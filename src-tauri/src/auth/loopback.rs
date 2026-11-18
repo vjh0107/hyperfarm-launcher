@@ -13,21 +13,31 @@ pub struct LoopbackReceiver {
 
 impl LoopbackReceiver {
     pub async fn bind() -> std::io::Result<Self> {
-        Ok(Self { listener: TcpListener::bind(("127.0.0.1", 0)).await? })
+        Ok(Self {
+            listener: TcpListener::bind(("127.0.0.1", 0)).await?,
+        })
     }
 
     pub fn redirect_uri(&self) -> String {
-        let port = self.listener.local_addr().map(|address| address.port()).unwrap_or_default();
+        let port = self
+            .listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or_default();
         format!("http://localhost:{port}")
     }
 
     pub async fn await_redirect(&self, timeout: Duration) -> Option<HashMap<String, String>> {
-        tokio::time::timeout(timeout, self.accept_redirect()).await.ok()
+        tokio::time::timeout(timeout, self.accept_redirect())
+            .await
+            .ok()
     }
 
     async fn accept_redirect(&self) -> HashMap<String, String> {
         loop {
-            let Ok((stream, _)) = self.listener.accept().await else { continue };
+            let Ok((stream, _)) = self.listener.accept().await else {
+                continue;
+            };
             if let Some(query) = answer(stream).await {
                 return query;
             }
@@ -44,7 +54,10 @@ async fn answer(mut stream: TcpStream) -> Option<HashMap<String, String>> {
             break;
         }
         read += n;
-        if buffer[..read].windows(4).any(|window| window == b"\r\n\r\n") {
+        if buffer[..read]
+            .windows(4)
+            .any(|window| window == b"\r\n\r\n")
+        {
             break;
         }
     }
@@ -52,7 +65,9 @@ async fn answer(mut stream: TcpStream) -> Option<HashMap<String, String>> {
     let target = request.lines().next()?.split_whitespace().nth(1)?;
     let query = parse_query(target.split_once('?').map(|(_, query)| query).unwrap_or(""));
     if !query.contains_key("code") && !query.contains_key("error") {
-        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        let _ = stream
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
         return None;
     }
     let response = format!(
@@ -64,5 +79,7 @@ async fn answer(mut stream: TcpStream) -> Option<HashMap<String, String>> {
 }
 
 pub fn parse_query(raw: &str) -> HashMap<String, String> {
-    url::form_urlencoded::parse(raw.as_bytes()).into_owned().collect()
+    url::form_urlencoded::parse(raw.as_bytes())
+        .into_owned()
+        .collect()
 }

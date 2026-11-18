@@ -36,7 +36,11 @@ pub struct LauncherError {
 
 impl LauncherError {
     pub fn new(problem: Problem, message: impl Into<String>) -> Self {
-        Self { problem, message: message.into(), disk: None }
+        Self {
+            problem,
+            message: message.into(),
+            disk: None,
+        }
     }
 
     pub fn network() -> Self {
@@ -47,7 +51,10 @@ impl LauncherError {
         Self {
             problem: Problem::DiskFull,
             message: "저장 공간이 부족해요.".into(),
-            disk: Some(DiskSpace { needed_bytes, usable_bytes }),
+            disk: Some(DiskSpace {
+                needed_bytes,
+                usable_bytes,
+            }),
         }
     }
 }

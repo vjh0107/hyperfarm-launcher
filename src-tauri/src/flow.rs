@@ -29,17 +29,37 @@ pub enum LaunchEvent {
     Checking,
     WaitingForSignIn,
     #[serde(rename_all = "camelCase")]
-    SignedIn { player_id: String, name: String },
+    SignedIn {
+        player_id: String,
+        name: String,
+    },
     #[serde(rename_all = "camelCase")]
-    Preparing { minecraft_version: String, mods: usize, shaderpacks: usize },
+    Preparing {
+        minecraft_version: String,
+        mods: usize,
+        shaderpacks: usize,
+    },
     Downloading(DownloadPlan),
     #[serde(rename_all = "camelCase")]
-    Progress { done_bytes: u64, total_bytes: u64, file: String },
-    Launching { server: String },
+    Progress {
+        done_bytes: u64,
+        total_bytes: u64,
+        file: String,
+    },
+    Launching {
+        server: String,
+    },
     Launched,
-    Failed { error: LauncherError },
+    Failed {
+        error: LauncherError,
+    },
     #[serde(rename_all = "camelCase")]
-    Mismatch { web_player_id: String, web_name: String, session_player_id: String, session_name: String },
+    Mismatch {
+        web_player_id: String,
+        web_name: String,
+        session_player_id: String,
+        session_name: String,
+    },
 }
 
 pub type Emitter = Arc<dyn Fn(LaunchEvent) + Send + Sync>;
@@ -70,11 +90,17 @@ pub struct LaunchFlow {
 impl LaunchFlow {
     pub fn new(config: LauncherConfig, browser: BrowserOpener, emit: Emitter) -> Self {
         let http = Http::new();
-        let microsoft = MicrosoftClient::new(http.clone(), MicrosoftEndpoints::consumers(), CLIENT_ID.into(), browser);
+        let microsoft = MicrosoftClient::new(
+            http.clone(),
+            MicrosoftEndpoints::consumers(),
+            CLIENT_ID.into(),
+            browser,
+        );
         let xbox = XboxClient::new(http.clone(), XboxEndpoints::default());
         let authenticator = Authenticator::new(microsoft, xbox, Box::new(KeyringAccountStore));
         let total_memory = sysinfo::System::new_with_specifics(
-            sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram()),
+            sysinfo::RefreshKind::nothing()
+                .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram()),
         )
         .map_or(0, |system| system.total_memory());
         let settings = SettingsStore::new(config.home.join("launcher.json"), total_memory);
@@ -110,8 +136,14 @@ impl LaunchFlow {
         }
         let event = match self.launch(step).await {
             Ok(()) => LaunchEvent::Launched,
-            Err(AuthError::Mismatch { session, web_player_id }) => {
-                let web_name = self.player_name(&web_player_id).await.unwrap_or_else(|| "웹 계정".into());
+            Err(AuthError::Mismatch {
+                session,
+                web_player_id,
+            }) => {
+                let web_name = self
+                    .player_name(&web_player_id)
+                    .await
+                    .unwrap_or_else(|| "웹 계정".into());
                 let event = LaunchEvent::Mismatch {
                     web_player_id,
                     web_name,
@@ -165,7 +197,11 @@ impl LaunchFlow {
     async fn launch(&self, step: Step) -> Result<(), AuthError> {
         (self.emit)(LaunchEvent::Checking);
         let ticket = self.redeem().await;
-        let accepted = if step == Step::ContinueAnyway { self.mismatched.lock().unwrap().take() } else { None };
+        let accepted = if step == Step::ContinueAnyway {
+            self.mismatched.lock().unwrap().take()
+        } else {
+            None
+        };
         let session = match accepted {
             Some(session) => session,
             None => {
@@ -176,13 +212,20 @@ impl LaunchFlow {
                     emit(LaunchEvent::WaitingForSignIn);
                 };
                 if step == Step::SwitchAccount {
-                    self.authenticator.switch_account(ticket.as_ref(), &waiting).await?
+                    self.authenticator
+                        .switch_account(ticket.as_ref(), &waiting)
+                        .await?
                 } else {
-                    self.authenticator.authenticate(ticket.as_ref(), &waiting).await?
+                    self.authenticator
+                        .authenticate(ticket.as_ref(), &waiting)
+                        .await?
                 }
             }
         };
-        (self.emit)(LaunchEvent::SignedIn { player_id: session.player_id.clone(), name: session.name.clone() });
+        (self.emit)(LaunchEvent::SignedIn {
+            player_id: session.player_id.clone(),
+            name: session.name.clone(),
+        });
 
         let pack = pack::load(&self.http, &self.config.pack_manifest).await?;
         (self.emit)(LaunchEvent::Preparing {
@@ -191,17 +234,33 @@ impl LaunchFlow {
             shaderpacks: pack.shaderpacks.len(),
         });
         let layout = GameLayout::new(self.game_directory());
-        let installer = GameInstaller::new(self.http.clone(), layout.clone(), self.platform.clone());
-        let installation = installer.install(&pack, &FlowInstallListener { emit: self.emit.clone() }).await?;
+        let installer =
+            GameInstaller::new(self.http.clone(), layout.clone(), self.platform.clone());
+        let installation = installer
+            .install(
+                &pack,
+                &FlowInstallListener {
+                    emit: self.emit.clone(),
+                },
+            )
+            .await?;
 
-        (self.emit)(LaunchEvent::Launching { server: installation.server.clone() });
+        (self.emit)(LaunchEvent::Launching {
+            server: installation.server.clone(),
+        });
         let options = LaunchOptions {
             memory_megabytes: self.settings.load().memory_megabytes,
             client_id: CLIENT_ID,
             launcher_version: env!("CARGO_PKG_VERSION"),
         };
         let command = launch::command(&installation, &session, &options, &self.platform);
-        launch::start(&command, &installation.game_directory, layout.logs().join(GAME_LOG), WINDOW_TIMEOUT).await?;
+        launch::start(
+            &command,
+            &installation.game_directory,
+            layout.logs().join(GAME_LOG),
+            WINDOW_TIMEOUT,
+        )
+        .await?;
         Ok(())
     }
 
@@ -252,7 +311,11 @@ impl InstallListener for FlowInstallListener {
                 return;
             }
             *last = Instant::now();
-            emit(LaunchEvent::Progress { done_bytes, total_bytes, file: file.to_string() });
+            emit(LaunchEvent::Progress {
+                done_bytes,
+                total_bytes,
+                file: file.to_string(),
+            });
         })
     }
 }

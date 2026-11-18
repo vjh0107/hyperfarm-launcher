@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use reqwest::{Client, RequestBuilder};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::error::LauncherError;
 
@@ -12,11 +12,18 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
     #[error("{url} answered {status}")]
-    Status { url: String, status: u16, body: String },
+    Status {
+        url: String,
+        status: u16,
+        body: String,
+    },
     #[error(transparent)]
     Transport(#[from] reqwest::Error),
     #[error("{url} sent unreadable JSON: {source}")]
-    Decode { url: String, source: serde_json::Error },
+    Decode {
+        url: String,
+        source: serde_json::Error,
+    },
 }
 
 impl HttpError {
@@ -65,15 +72,27 @@ impl Http {
         read(url, self.client.get(url)).await
     }
 
-    pub async fn get_json_bearer<T: DeserializeOwned>(&self, url: &str, token: &str) -> Result<T, HttpError> {
+    pub async fn get_json_bearer<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        token: &str,
+    ) -> Result<T, HttpError> {
         read(url, self.client.get(url).bearer_auth(token)).await
     }
 
-    pub async fn post_json<B: Serialize + ?Sized, T: DeserializeOwned>(&self, url: &str, body: &B) -> Result<T, HttpError> {
+    pub async fn post_json<B: Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        url: &str,
+        body: &B,
+    ) -> Result<T, HttpError> {
         read(url, self.client.post(url).json(body)).await
     }
 
-    pub async fn post_form<T: DeserializeOwned>(&self, url: &str, form: &[(&str, &str)]) -> Result<T, HttpError> {
+    pub async fn post_form<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        form: &[(&str, &str)],
+    ) -> Result<T, HttpError> {
         read(url, self.client.post(url).form(form)).await
     }
 
@@ -89,11 +108,22 @@ impl Default for Http {
 }
 
 async fn read<T: DeserializeOwned>(url: &str, request: RequestBuilder) -> Result<T, HttpError> {
-    let response = request.header("Accept", "application/json").timeout(REQUEST_TIMEOUT).send().await?;
+    let response = request
+        .header("Accept", "application/json")
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await?;
     let status = response.status();
     let body = response.text().await?;
     if !status.is_success() {
-        return Err(HttpError::Status { url: url.to_string(), status: status.as_u16(), body });
+        return Err(HttpError::Status {
+            url: url.to_string(),
+            status: status.as_u16(),
+            body,
+        });
     }
-    serde_json::from_str(&body).map_err(|source| HttpError::Decode { url: url.to_string(), source })
+    serde_json::from_str(&body).map_err(|source| HttpError::Decode {
+        url: url.to_string(),
+        source,
+    })
 }

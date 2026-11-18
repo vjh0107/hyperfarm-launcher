@@ -20,7 +20,8 @@ impl Default for XboxEndpoints {
         Self {
             user_authenticate: "https://user.auth.xboxlive.com/user/authenticate".into(),
             xsts_authorize: "https://xsts.auth.xboxlive.com/xsts/authorize".into(),
-            minecraft_login: "https://api.minecraftservices.com/authentication/login_with_xbox".into(),
+            minecraft_login: "https://api.minecraftservices.com/authentication/login_with_xbox"
+                .into(),
             minecraft_profile: "https://api.minecraftservices.com/minecraft/profile".into(),
         }
     }
@@ -77,7 +78,10 @@ impl XboxClient {
         Self { http, endpoints }
     }
 
-    pub async fn authenticate(&self, microsoft_access_token: &str) -> Result<MinecraftSession, LauncherError> {
+    pub async fn authenticate(
+        &self,
+        microsoft_access_token: &str,
+    ) -> Result<MinecraftSession, LauncherError> {
         let xbox_live: XboxResponse = xbox(
             self.http
                 .post_json(
@@ -95,7 +99,9 @@ impl XboxClient {
                 .await,
             XBOX_FAILED,
         )?;
-        let xbox_token = xbox_live.token.ok_or_else(|| LauncherError::new(Problem::LoginFailed, XBOX_FAILED))?;
+        let xbox_token = xbox_live
+            .token
+            .ok_or_else(|| LauncherError::new(Problem::LoginFailed, XBOX_FAILED))?;
 
         let xsts: XboxResponse = xbox(
             self.http
@@ -110,10 +116,15 @@ impl XboxClient {
                 .await,
             XBOX_FAILED,
         )?;
-        let user = xsts.display_claims.and_then(|claims| claims.xui).and_then(|users| users.into_iter().next());
-        let (Some(xsts_token), Some(user_hash), Some(xuid)) =
-            (xsts.token, user.as_ref().and_then(|u| u.uhs.clone()), user.and_then(|u| u.xid))
-        else {
+        let user = xsts
+            .display_claims
+            .and_then(|claims| claims.xui)
+            .and_then(|users| users.into_iter().next());
+        let (Some(xsts_token), Some(user_hash), Some(xuid)) = (
+            xsts.token,
+            user.as_ref().and_then(|u| u.uhs.clone()),
+            user.and_then(|u| u.xid),
+        ) else {
             return Err(LauncherError::new(Problem::LoginFailed, XBOX_FAILED));
         };
 
@@ -126,21 +137,30 @@ impl XboxClient {
                 .await,
             NO_JAVA_EDITION,
         )?;
-        let minecraft_token =
-            login.access_token.ok_or_else(|| LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION))?;
+        let minecraft_token = login
+            .access_token
+            .ok_or_else(|| LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION))?;
 
-        let profile: ProfileResponse =
-            match self.http.get_json_bearer(&self.endpoints.minecraft_profile, &minecraft_token).await {
-                Ok(profile) => profile,
-                Err(error) if error.status() == Some(404) => {
-                    return Err(LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION));
-                }
-                Err(error) => return Err(error.into()),
-            };
+        let profile: ProfileResponse = match self
+            .http
+            .get_json_bearer(&self.endpoints.minecraft_profile, &minecraft_token)
+            .await
+        {
+            Ok(profile) => profile,
+            Err(error) if error.status() == Some(404) => {
+                return Err(LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION));
+            }
+            Err(error) => return Err(error.into()),
+        };
         let (Some(id), Some(name)) = (profile.id, profile.name) else {
             return Err(LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION));
         };
-        Ok(MinecraftSession { access_token: minecraft_token, player_id: dashed_uuid(&id)?, name, xuid })
+        Ok(MinecraftSession {
+            access_token: minecraft_token,
+            player_id: dashed_uuid(&id)?,
+            name,
+            xuid,
+        })
     }
 }
 
@@ -151,7 +171,10 @@ fn xbox<T>(result: Result<T, HttpError>, failure: &str) -> Result<T, LauncherErr
             if let Some(described) = describe(error.body()) {
                 return Err(described);
             }
-            if error.status().is_some_and(|status| (400..500).contains(&status)) {
+            if error
+                .status()
+                .is_some_and(|status| (400..500).contains(&status))
+            {
                 return Err(LauncherError::new(Problem::LoginFailed, failure));
             }
             Err(error.into())
@@ -164,13 +187,25 @@ pub fn describe(body: &str) -> Option<LauncherError> {
         return None;
     }
     let (problem, message) = if body.contains("2148916233") {
-        (Problem::NoXboxProfile, "Xbox 프로필을 만든 뒤 다시 시도해 주세요.")
+        (
+            Problem::NoXboxProfile,
+            "Xbox 프로필을 만든 뒤 다시 시도해 주세요.",
+        )
     } else if body.contains("2148916235") {
-        (Problem::AccountRestricted, "Xbox Live 를 쓸 수 없는 국가의 계정이에요.")
+        (
+            Problem::AccountRestricted,
+            "Xbox Live 를 쓸 수 없는 국가의 계정이에요.",
+        )
     } else if body.contains("2148916236") || body.contains("2148916237") {
-        (Problem::AccountRestricted, "성인 인증을 마친 뒤 다시 시도해 주세요.")
+        (
+            Problem::AccountRestricted,
+            "성인 인증을 마친 뒤 다시 시도해 주세요.",
+        )
     } else if body.contains("2148916238") {
-        (Problem::ChildAccount, "미성년 계정은 보호자의 Microsoft 가족 그룹에 추가되어야 해요.")
+        (
+            Problem::ChildAccount,
+            "미성년 계정은 보호자의 Microsoft 가족 그룹에 추가되어야 해요.",
+        )
     } else {
         return None;
     };
@@ -179,8 +214,18 @@ pub fn describe(body: &str) -> Option<LauncherError> {
 
 pub fn dashed_uuid(undashed: &str) -> Result<String, LauncherError> {
     if undashed.len() != 32 || !undashed.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(LauncherError::new(Problem::LoginFailed, "마인크래프트 프로필을 읽지 못했어요."));
+        return Err(LauncherError::new(
+            Problem::LoginFailed,
+            "마인크래프트 프로필을 읽지 못했어요.",
+        ));
     }
     let lower = undashed.to_ascii_lowercase();
-    Ok(format!("{}-{}-{}-{}-{}", &lower[0..8], &lower[8..12], &lower[12..16], &lower[16..20], &lower[20..32]))
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &lower[0..8],
+        &lower[8..12],
+        &lower[12..16],
+        &lower[16..20],
+        &lower[20..32]
+    ))
 }

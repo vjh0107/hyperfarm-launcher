@@ -75,16 +75,30 @@ pub struct DownloadTask {
 
 impl DownloadTask {
     pub fn new(url: &str, target: PathBuf, size: Option<u64>, hash: Option<Hash>) -> Self {
-        Self { url: url.into(), target, size, hash, content_addressed: false }
+        Self {
+            url: url.into(),
+            target,
+            size,
+            hash,
+            content_addressed: false,
+        }
     }
 
     // 에셋은 경로가 곧 해시라 크기만 맞으면 같은 파일이다. 매번 3천 개를 다시 해시하면 실행이 몇 초 늦어진다
     pub fn asset(url: &str, target: PathBuf, size: u64, hash: Hash) -> Self {
-        Self { url: url.into(), target, size: Some(size), hash: Some(hash), content_addressed: true }
+        Self {
+            url: url.into(),
+            target,
+            size: Some(size),
+            hash: Some(hash),
+            content_addressed: true,
+        }
     }
 
     pub async fn is_satisfied(&self) -> bool {
-        let Ok(metadata) = tokio::fs::metadata(&self.target).await else { return false };
+        let Ok(metadata) = tokio::fs::metadata(&self.target).await else {
+            return false;
+        };
         if !metadata.is_file() || self.size.is_some_and(|size| metadata.len() != size) {
             return false;
         }
@@ -103,7 +117,9 @@ impl DownloadTask {
 }
 
 async fn file_matches(path: &Path, hash: &Hash) -> bool {
-    let Ok(mut file) = tokio::fs::File::open(path).await else { return false };
+    let Ok(mut file) = tokio::fs::File::open(path).await else {
+        return false;
+    };
     let mut hasher = hash.digest();
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
@@ -145,7 +161,12 @@ impl Downloader {
         fetch(&self.client, task, &AtomicU64::new(0), 0, &ignore).await
     }
 
-    pub async fn fetch_all(&self, missing: &[DownloadTask], root: &Path, progress: Progress) -> Result<(), LauncherError> {
+    pub async fn fetch_all(
+        &self,
+        missing: &[DownloadTask],
+        root: &Path,
+        progress: Progress,
+    ) -> Result<(), LauncherError> {
         let total: u64 = missing.iter().map(DownloadTask::expected_bytes).sum();
         tokio::fs::create_dir_all(root).await.map_err(io_error)?;
         let usable = usable_space(root);
@@ -163,18 +184,44 @@ impl Downloader {
     }
 }
 
-async fn fetch(client: &reqwest::Client, task: &DownloadTask, done: &AtomicU64, total: u64, progress: &Progress) -> Result<(), LauncherError> {
-    let parent = task.target.parent().expect("download targets always live in a directory");
+async fn fetch(
+    client: &reqwest::Client,
+    task: &DownloadTask,
+    done: &AtomicU64,
+    total: u64,
+    progress: &Progress,
+) -> Result<(), LauncherError> {
+    let parent = task
+        .target
+        .parent()
+        .expect("download targets always live in a directory");
     tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
-    let file_name = task.target.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_string();
+    let file_name = task
+        .target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
     let partial = task.target.with_file_name(format!("{file_name}.part"));
     let mut attempt = 1;
     loop {
         let mut received = 0u64;
-        let result = transfer(client, task, &partial, &mut received, done, total, progress, &file_name).await;
+        let result = transfer(
+            client,
+            task,
+            &partial,
+            &mut received,
+            done,
+            total,
+            progress,
+            &file_name,
+        )
+        .await;
         match result {
             Ok(()) => {
-                tokio::fs::rename(&partial, &task.target).await.map_err(io_error)?;
+                tokio::fs::rename(&partial, &task.target)
+                    .await
+                    .map_err(io_error)?;
                 return Ok(());
             }
             Err(error) => {
@@ -183,9 +230,10 @@ async fn fetch(client: &reqwest::Client, task: &DownloadTask, done: &AtomicU64, 
                 if attempt == ATTEMPTS {
                     log::warn!("Giving up on {}: {error}", task.url);
                     return Err(match error {
-                        TransferError::Corrupt(_) => {
-                            LauncherError::new(Problem::CorruptDownload, format!("받은 파일이 손상됐어요. ({file_name})"))
-                        }
+                        TransferError::Corrupt(_) => LauncherError::new(
+                            Problem::CorruptDownload,
+                            format!("받은 파일이 손상됐어요. ({file_name})"),
+                        ),
                         TransferError::Io(_) => io_error(std::io::Error::other("write failed")),
                         TransferError::Network(_) => LauncherError::network(),
                     });
@@ -218,9 +266,17 @@ async fn transfer(
     progress: &Progress,
     file_name: &str,
 ) -> Result<(), TransferError> {
-    let response = client.get(&task.url).send().await.map_err(|e| TransferError::Network(e.to_string()))?;
+    let response = client
+        .get(&task.url)
+        .send()
+        .await
+        .map_err(|e| TransferError::Network(e.to_string()))?;
     if !response.status().is_success() {
-        return Err(TransferError::Network(format!("{} answered {}", task.url, response.status())));
+        return Err(TransferError::Network(format!(
+            "{} answered {}",
+            task.url,
+            response.status()
+        )));
     }
     let mut hasher = task.hash.as_ref().map(Hash::digest);
     let mut file = tokio::fs::File::create(partial).await?;
@@ -237,18 +293,26 @@ async fn transfer(
     }
     file.flush().await?;
     if task.size.is_some_and(|size| *received != size) {
-        return Err(TransferError::Corrupt(format!("{} sent {} bytes, expected {:?}", task.url, received, task.size)));
+        return Err(TransferError::Corrupt(format!(
+            "{} sent {} bytes, expected {:?}",
+            task.url, received, task.size
+        )));
     }
-    if let (Some(hash), Some(hasher)) = (&task.hash, hasher) {
-        if hasher.finish() != hash.expected() {
-            return Err(TransferError::Corrupt(format!("{} does not match its hash", task.url)));
-        }
+    if let (Some(hash), Some(hasher)) = (&task.hash, hasher)
+        && hasher.finish() != hash.expected()
+    {
+        return Err(TransferError::Corrupt(format!(
+            "{} does not match its hash",
+            task.url
+        )));
     }
     Ok(())
 }
 
 fn usable_space(path: &Path) -> u64 {
-    let Ok(disks) = sysinfo::Disks::new_with_refreshed_list() else { return u64::MAX };
+    let Ok(disks) = sysinfo::Disks::new_with_refreshed_list() else {
+        return u64::MAX;
+    };
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     disks
         .iter()
@@ -260,7 +324,10 @@ fn usable_space(path: &Path) -> u64 {
 
 pub fn io_error(error: std::io::Error) -> LauncherError {
     log::warn!("File system error: {error}");
-    LauncherError::new(Problem::CorruptDownload, "게임 폴더에 파일을 쓰지 못했어요.")
+    LauncherError::new(
+        Problem::CorruptDownload,
+        "게임 폴더에 파일을 쓰지 못했어요.",
+    )
 }
 
 #[cfg(test)]

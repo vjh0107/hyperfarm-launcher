@@ -41,7 +41,11 @@ struct AppInfo {
 #[serde(tag = "state", rename_all = "camelCase")]
 enum UpdateEvent {
     #[serde(rename_all = "camelCase")]
-    Downloading { version: String, done_bytes: u64, total_bytes: Option<u64> },
+    Downloading {
+        version: String,
+        done_bytes: u64,
+        total_bytes: Option<u64>,
+    },
     Installing,
 }
 
@@ -62,10 +66,10 @@ async fn run_step(step: Step, flow: State<'_, Flow>) -> Result<(), ()> {
 
 #[tauri::command]
 fn reopen_sign_in(app: AppHandle, flow: State<'_, Flow>) {
-    if let Some(url) = flow.reopen_sign_in() {
-        if let Err(error) = app.opener().open_url(url, None::<&str>) {
-            log::warn!("Could not reopen the sign-in page: {error}");
-        }
+    if let Some(url) = flow.reopen_sign_in()
+        && let Err(error) = app.opener().open_url(url, None::<&str>)
+    {
+        log::warn!("Could not reopen the sign-in page: {error}");
     }
 }
 
@@ -101,14 +105,20 @@ fn save_settings(settings: LauncherSettings, flow: State<'_, Flow>) -> Result<()
 fn open_game_directory(app: AppHandle, flow: State<'_, Flow>) {
     let directory = flow.game_directory();
     let _ = std::fs::create_dir_all(&directory);
-    if let Err(error) = app.opener().open_path(directory.to_string_lossy(), None::<&str>) {
+    if let Err(error) = app
+        .opener()
+        .open_path(directory.to_string_lossy(), None::<&str>)
+    {
         log::warn!("Could not open the game directory: {error}");
     }
 }
 
 #[tauri::command]
 fn open_game_log(app: AppHandle, flow: State<'_, Flow>) {
-    if let Err(error) = app.opener().open_path(flow.game_log().to_string_lossy(), None::<&str>) {
+    if let Err(error) = app
+        .opener()
+        .open_path(flow.game_log().to_string_lossy(), None::<&str>)
+    {
         log::warn!("Could not open the game log: {error}");
     }
 }
@@ -121,9 +131,21 @@ fn open_xbox_profile(app: AppHandle) {
 }
 
 #[tauri::command]
-async fn choose_game_directory(app: AppHandle, flow: State<'_, Flow>) -> Result<Option<PathBuf>, String> {
-    let Some(picked) = app.dialog().file().set_directory(flow.game_directory()).blocking_pick_folder() else { return Ok(None) };
-    let directory = picked.into_path().map_err(|_| "이 폴더는 쓸 수 없어요.".to_string())?;
+async fn choose_game_directory(
+    app: AppHandle,
+    flow: State<'_, Flow>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_directory(flow.game_directory())
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    let directory = picked
+        .into_path()
+        .map_err(|_| "이 폴더는 쓸 수 없어요.".to_string())?;
     let mut settings = flow.settings();
     settings.game_directory = Some(directory.clone());
     save_settings(settings, flow)?;
@@ -155,7 +177,14 @@ async fn update(app: &AppHandle) -> bool {
         .download_and_install(
             |chunk, total_bytes| {
                 done_bytes += chunk as u64;
-                let _ = app.emit(UPDATE_EVENT, UpdateEvent::Downloading { version: version.clone(), done_bytes, total_bytes });
+                let _ = app.emit(
+                    UPDATE_EVENT,
+                    UpdateEvent::Downloading {
+                        version: version.clone(),
+                        done_bytes,
+                        total_bytes,
+                    },
+                );
             },
             || {
                 let _ = app.emit(UPDATE_EVENT, UpdateEvent::Installing);
@@ -179,17 +208,23 @@ fn accept_links(app: &AppHandle, urls: impl IntoIterator<Item = String>) -> bool
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _arguments, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-        }))
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _arguments, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            },
+        ))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
-                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: Some("launcher".into()) }))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("launcher".into()),
+                    },
+                ))
                 .max_file_size(2 * 1024 * 1024)
                 .build(),
         )
@@ -201,7 +236,10 @@ pub fn run() {
             let handle = app.handle().clone();
             let opener = handle.clone();
             let browser = Arc::new(move |url: &str| {
-                opener.opener().open_url(url, None::<&str>).map_err(std::io::Error::other)
+                opener
+                    .opener()
+                    .open_url(url, None::<&str>)
+                    .map_err(std::io::Error::other)
             });
             let emitter = handle.clone();
             let emit = Arc::new(move |event: LaunchEvent| {
@@ -214,7 +252,11 @@ pub fn run() {
                 }
                 let _ = emitter.emit(LAUNCH_EVENT, event);
             });
-            app.manage::<Flow>(Arc::new(LaunchFlow::new(LauncherConfig::load(), browser, emit)));
+            app.manage::<Flow>(Arc::new(LaunchFlow::new(
+                LauncherConfig::load(),
+                browser,
+                emit,
+            )));
 
             #[cfg(any(windows, target_os = "linux"))]
             if let Err(error) = app.deep_link().register_all() {

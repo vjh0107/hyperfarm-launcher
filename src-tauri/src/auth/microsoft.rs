@@ -11,8 +11,12 @@ use crate::error::{LauncherError, Problem};
 use crate::http::{Http, HttpError};
 
 const SCOPE: &str = "XboxLive.signin offline_access";
-const INTERACTION_ERRORS: [&str; 4] =
-    ["interaction_required", "login_required", "consent_required", "account_selection_required"];
+const INTERACTION_ERRORS: [&str; 4] = [
+    "interaction_required",
+    "login_required",
+    "consent_required",
+    "account_selection_required",
+];
 
 #[derive(Clone)]
 pub struct MicrosoftEndpoints {
@@ -79,8 +83,18 @@ pub struct MicrosoftClient {
 }
 
 impl MicrosoftClient {
-    pub fn new(http: Http, endpoints: MicrosoftEndpoints, client_id: String, browser: BrowserOpener) -> Self {
-        Self { http, endpoints, client_id, browser }
+    pub fn new(
+        http: Http,
+        endpoints: MicrosoftEndpoints,
+        client_id: String,
+        browser: BrowserOpener,
+    ) -> Self {
+        Self {
+            http,
+            endpoints,
+            client_id,
+            browser,
+        }
     }
 
     pub async fn sign_in(
@@ -98,7 +112,8 @@ impl MicrosoftClient {
             .map_err(|_| LauncherError::new(Problem::LoginFailed, "로그인 창을 열지 못했어요."))?;
         let redirect_uri = receiver.redirect_uri();
         let page = self.authorize_url(prompt, login_hint, &challenge, &state, &redirect_uri);
-        (self.browser)(&page).map_err(|_| LauncherError::new(Problem::LoginFailed, "브라우저를 열지 못했어요."))?;
+        (self.browser)(&page)
+            .map_err(|_| LauncherError::new(Problem::LoginFailed, "브라우저를 열지 못했어요."))?;
         if let Some(waiting) = on_waiting {
             waiting(page.clone());
         }
@@ -106,22 +121,40 @@ impl MicrosoftClient {
             if prompt == Prompt::None {
                 return Err(SignInError::InteractionRequired("timeout".into()));
             }
-            return Err(LauncherError::new(Problem::LoginCancelled, "로그인 시간이 지났어요. 다시 시도해 주세요.").into());
+            return Err(LauncherError::new(
+                Problem::LoginCancelled,
+                "로그인 시간이 지났어요. 다시 시도해 주세요.",
+            )
+            .into());
         };
         if response.get("state") != Some(&state) {
-            return Err(LauncherError::new(Problem::LoginFailed, "로그인 응답이 올바르지 않아요. 다시 시도해 주세요.").into());
+            return Err(LauncherError::new(
+                Problem::LoginFailed,
+                "로그인 응답이 올바르지 않아요. 다시 시도해 주세요.",
+            )
+            .into());
         }
         if let Some(error) = response.get("error") {
             if INTERACTION_ERRORS.contains(&error.as_str()) {
                 return Err(SignInError::InteractionRequired(error.clone()));
             }
             if error == "access_denied" {
-                return Err(LauncherError::new(Problem::LoginCancelled, "로그인을 취소했어요.").into());
+                return Err(
+                    LauncherError::new(Problem::LoginCancelled, "로그인을 취소했어요.").into(),
+                );
             }
-            return Err(LauncherError::new(Problem::LoginFailed, format!("Microsoft 로그인에 실패했어요. ({error})")).into());
+            return Err(LauncherError::new(
+                Problem::LoginFailed,
+                format!("Microsoft 로그인에 실패했어요. ({error})"),
+            )
+            .into());
         }
         let Some(code) = response.get("code").filter(|code| !code.is_empty()) else {
-            return Err(LauncherError::new(Problem::LoginFailed, "로그인 응답에 인증 코드가 없어요.").into());
+            return Err(LauncherError::new(
+                Problem::LoginFailed,
+                "로그인 응답에 인증 코드가 없어요.",
+            )
+            .into());
         };
         Ok(self
             .token(&[
@@ -135,15 +168,31 @@ impl MicrosoftClient {
     }
 
     pub async fn refresh(&self, refresh_token: &str) -> Result<MicrosoftTokens, RefreshError> {
-        match self.token(&[("grant_type", "refresh_token"), ("refresh_token", refresh_token)]).await {
+        match self
+            .token(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ])
+            .await
+        {
             Ok(tokens) => Ok(tokens),
-            Err(error) if error.status() == Some(400) && error.body().contains("invalid_grant") => Err(RefreshError::InvalidGrant),
+            Err(error) if error.status() == Some(400) && error.body().contains("invalid_grant") => {
+                Err(RefreshError::InvalidGrant)
+            }
             Err(error) => Err(RefreshError::Failed(error.into())),
         }
     }
 
-    pub fn authorize_url(&self, prompt: Prompt, login_hint: Option<&str>, challenge: &str, state: &str, redirect_uri: &str) -> String {
-        let mut url = url::Url::parse(&self.endpoints.authorize).expect("the authorize endpoint is a valid URL");
+    pub fn authorize_url(
+        &self,
+        prompt: Prompt,
+        login_hint: Option<&str>,
+        challenge: &str,
+        state: &str,
+        redirect_uri: &str,
+    ) -> String {
+        let mut url = url::Url::parse(&self.endpoints.authorize)
+            .expect("the authorize endpoint is a valid URL");
         {
             let mut query = url.query_pairs_mut();
             query

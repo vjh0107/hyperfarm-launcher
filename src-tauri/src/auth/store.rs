@@ -43,7 +43,9 @@ impl AccountStore for KeyringAccountStore {
         let Some(entry) = Self::entry() else { return };
         let json = serde_json::to_string(account).expect("a stored account always serializes");
         if let Err(error) = entry.set_password(&json) {
-            log::warn!("Could not store the Microsoft account; the next launch signs in again: {error}");
+            log::warn!(
+                "Could not store the Microsoft account; the next launch signs in again: {error}"
+            );
         }
     }
 

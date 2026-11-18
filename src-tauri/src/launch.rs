@@ -22,9 +22,19 @@ pub struct LaunchOptions<'a> {
     pub launcher_version: &'a str,
 }
 
-pub fn command(installation: &Installation, session: &MinecraftSession, options: &LaunchOptions, platform: &Platform) -> Vec<String> {
+pub fn command(
+    installation: &Installation,
+    session: &MinecraftSession,
+    options: &LaunchOptions,
+    platform: &Platform,
+) -> Vec<String> {
     let separator = platform.classpath_separator();
-    let classpath = installation.classpath.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join(separator);
+    let classpath = installation
+        .classpath
+        .iter()
+        .map(|path| path.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(separator);
     let path = |path: &Path| path.to_string_lossy().into_owned();
     let variables: HashMap<&str, String> = HashMap::from([
         ("auth_player_name", session.name.clone()),
@@ -47,9 +57,16 @@ pub fn command(installation: &Installation, session: &MinecraftSession, options:
         ("quickPlayMultiplayer", installation.server.clone()),
     ]);
     let features: HashSet<&str> = FEATURES.into_iter().collect();
-    let substitute = |arguments| resolve_arguments(arguments, platform, &features).into_iter().map(|template| substitute(&template, &variables));
+    let substitute = |arguments| {
+        resolve_arguments(arguments, platform, &features)
+            .into_iter()
+            .map(|template| substitute(&template, &variables))
+    };
 
-    let mut command = vec![path(&installation.java), format!("-Xmx{}M", options.memory_megabytes)];
+    let mut command = vec![
+        path(&installation.java),
+        format!("-Xmx{}M", options.memory_megabytes),
+    ];
     command.extend(substitute(&installation.jvm_arguments));
     command.push(installation.main_class.clone());
     command.extend(substitute(&installation.game_arguments));
@@ -59,11 +76,21 @@ pub fn command(installation: &Installation, session: &MinecraftSession, options:
 fn substitute(template: &str, variables: &HashMap<&str, String>) -> String {
     let placeholder = Regex::new(r"\$\{([A-Za-z_]+)\}").expect("the placeholder pattern is valid");
     placeholder
-        .replace_all(template, |captures: &Captures| variables.get(&captures[1]).cloned().unwrap_or_else(|| captures[0].to_string()))
+        .replace_all(template, |captures: &Captures| {
+            variables
+                .get(&captures[1])
+                .cloned()
+                .unwrap_or_else(|| captures[0].to_string())
+        })
         .into_owned()
 }
 
-pub async fn start(command: &[String], working_directory: &Path, log: PathBuf, timeout: Duration) -> Result<Child, LauncherError> {
+pub async fn start(
+    command: &[String],
+    working_directory: &Path,
+    log: PathBuf,
+    timeout: Duration,
+) -> Result<Child, LauncherError> {
     let failed = |error: std::io::Error| {
         log::warn!("Could not start the game: {error}");
         LauncherError::new(Problem::GameExited, "게임을 실행하지 못했어요.")
@@ -75,7 +102,12 @@ pub async fn start(command: &[String], working_directory: &Path, log: PathBuf, t
     let output = std::fs::File::create(&log).map_err(failed)?;
     let errors = output.try_clone().map_err(failed)?;
     let mut process = Command::new(&command[0]);
-    process.args(&command[1..]).current_dir(working_directory).stdin(Stdio::null()).stdout(output).stderr(errors);
+    process
+        .args(&command[1..])
+        .current_dir(working_directory)
+        .stdin(Stdio::null())
+        .stdout(output)
+        .stderr(errors);
     #[cfg(windows)]
     process.creation_flags(0x0800_0000);
     let mut child = process.spawn().map_err(failed)?;
@@ -83,10 +115,18 @@ pub async fn start(command: &[String], working_directory: &Path, log: PathBuf, t
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some(status)) = child.try_wait() {
-            let code = status.code().map_or_else(|| "알 수 없음".to_string(), |code| code.to_string());
-            return Err(LauncherError::new(Problem::GameExited, format!("게임이 시작하자마자 꺼졌어요. (코드 {code})")));
+            let code = status
+                .code()
+                .map_or_else(|| "알 수 없음".to_string(), |code| code.to_string());
+            return Err(LauncherError::new(
+                Problem::GameExited,
+                format!("게임이 시작하자마자 꺼졌어요. (코드 {code})"),
+            ));
         }
-        if tokio::fs::read(&log).await.is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains(WINDOW_MARKER)) {
+        if tokio::fs::read(&log)
+            .await
+            .is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains(WINDOW_MARKER))
+        {
             break;
         }
         tokio::time::sleep(POLL_INTERVAL).await;
@@ -101,6 +141,9 @@ mod tests {
     #[test]
     fn keeps_unknown_placeholders() {
         let variables = HashMap::from([("auth_player_name", "Steve".to_string())]);
-        assert_eq!(substitute("--username=${auth_player_name} ${unknown}", &variables), "--username=Steve ${unknown}");
+        assert_eq!(
+            substitute("--username=${auth_player_name} ${unknown}", &variables),
+            "--username=Steve ${unknown}"
+        );
     }
 }
