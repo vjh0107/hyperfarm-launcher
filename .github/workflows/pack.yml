@@ -1,0 +1,21 @@
+name: Pack
+
+on:
+  push:
+    branches: [main]
+    paths: [pack/manifest.json]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload the pack manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: >
+          aws s3 cp pack/manifest.json "s3://${{ secrets.R2_BUCKET }}/launcher/manifest.json"
+          --endpoint-url "${{ secrets.R2_ENDPOINT }}" --cache-control "no-cache"

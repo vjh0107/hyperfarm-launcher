@@ -1,0 +1,16 @@
+HyperFarm Launcher
+Copyright (C) 2026 HyperFarm
+
+The source code in this repository is licensed under the GNU General Public License,
+version 3 only (see LICENSE).
+
+The following files are not covered by that license. They are the HyperFarm name, logo and
+artwork, and all rights to them are reserved. You may not use them in modified or
+redistributed versions of this software without permission:
+
+  src/assets/images/
+  src-tauri/icons/
+  packaging/
+
+The fonts in src/assets/fonts/ are licensed under the SIL Open Font License 1.1
+(see src/assets/fonts/OFL.txt).

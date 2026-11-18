@@ -1,7 +1,8 @@
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-.idea
-*.iml
-out/
+node_modules
+dist
+src-tauri/target
+src-tauri/gen/schemas
+*.log
 .DS_Store
+.idea
+.vscode/*

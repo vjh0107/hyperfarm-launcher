@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - name: Add the macOS Intel target
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: HyperFarm Launcher ${{ github.ref_name }}
+          releaseDraft: true
+          includeUpdaterJson: true
+          args: --target ${{ matrix.target }}
+
+  # 웹의 받기 단추와 런처의 자동 업데이트가 pack.hyperf.kr/launcher/ 의 고정 이름을 본다(hyperfarm-web 의
+  # src/lib/launcher.ts, tauri.conf.json 의 updater). 설치 파일을 먼저 올리고 latest.json 을 마지막에 올려야
+  # 런처가 아직 올라가지 않은 판을 받으려다 실패하지 않는다.
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2: s3://${{ secrets.R2_BUCKET }}/launcher
+      ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+    steps:
+      - name: Download the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release
+      - name: Upload the installers
+        working-directory: release
+        run: |
+          upload() { aws s3 cp "$1" "$R2/$2" --endpoint-url "$ENDPOINT" --cache-control "no-cache"; }
+          upload ./*_universal.dmg HyperFarm.dmg
+          upload ./*_x64-setup.exe HyperFarm-setup.exe
+          upload latest.json latest.json
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

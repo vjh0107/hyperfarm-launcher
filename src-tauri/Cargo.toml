@@ -1,0 +1,53 @@
+[package]
+name = "hyperfarm-launcher"
+version = "1.0.0"
+description = "하이퍼팜 런처"
+authors = ["HyperFarm"]
+license = "GPL-3.0-only"
+repository = "https://github.com/vjh0107/hyperfarm-launcher"
+edition = "2024"
+
+[lib]
+name = "hyperfarm_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.5", features = [] }
+
+[dependencies]
+base64 = "0.23.1"
+dirs = "7.0.0"
+futures-util = "0.3.34"
+hex = "0.4.3"
+keyring = "4.2.0"
+log = "0.4.35"
+rand = "0.10.4"
+regex-lite = "0.1.9"
+reqwest = { version = "0.13.5", features = ["json", "stream", "form"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+sysinfo = "0.40.4"
+tauri = { version = "2.12.6", features = ["macos-private-api"] }
+tauri-plugin-deep-link = "2.6.3"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-log = "2.10.2"
+tauri-plugin-opener = "2.7.3"
+tauri-plugin-process = "2.4.0"
+tauri-plugin-single-instance = { version = "2.5.5", features = ["deep-link"] }
+tauri-plugin-updater = "2.14.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net", "process", "sync", "time"] }
+url = "2.5.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+wiremock = "0.6.5"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

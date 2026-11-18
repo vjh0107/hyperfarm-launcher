@@ -1,0 +1,23 @@
+{
+  "minecraftVersion": "26.3",
+  "fabricLoaderVersion": "0.20.1",
+  "server": "hyperf.kr",
+  "mods": [
+    {"slug": "fabric-api"},
+    {"slug": "sodium"},
+    {"slug": "iris"},
+    {"slug": "voxy"},
+    {"slug": "lithium"},
+    {"slug": "ferrite-core"},
+    {"slug": "immediatelyfast"},
+    {"slug": "entityculling"},
+    {"slug": "dynamic-fps"}
+  ],
+  "shaderpacks": [
+    {"slug": "bsl-shaders"},
+    {"slug": "lux-v1", "version": "1.3"}
+  ],
+  "defaultOptions": {
+    "lang": "ko_kr"
+  }
+}

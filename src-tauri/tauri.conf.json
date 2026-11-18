@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HyperFarm",
+  "mainBinaryName": "HyperFarm",
+  "version": "../package.json",
+  "identifier": "kr.junhyung.hyperfarm.launcher",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "HyperFarm",
+        "width": 480,
+        "height": 320,
+        "resizable": false,
+        "maximizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https://hyperf.kr; style-src 'self' 'unsafe-inline'; font-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "HyperFarm",
+    "copyright": "HyperFarm",
+    "category": "Game",
+    "shortDescription": "HyperFarm launcher",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "background": "../packaging/dmg-background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 165, "y": 214 },
+        "applicationFolderPosition": { "x": 495, "y": 214 }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean"],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["hyperfarm"] }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCNEU4OEI0RTE1QjdBNUUKUldSZWVsdmh0SWhPKzVkSHo5REo1d3dNcmphcjQ5MURhcS9melpDODcxdGhqTjd3eU8zWHkvaE4K",
+      "endpoints": ["https://pack.hyperf.kr/launcher/latest.json"]
+    }
+  }
+}
