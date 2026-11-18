@@ -7,6 +7,7 @@ files="${1:?usage: scripts/publish-launcher.sh <release-files-dir> <version>}"
 version="${2:?usage: scripts/publish-launcher.sh <release-files-dir> <version>}"
 : "${R2:?}" "${ENDPOINT:?}" "${PUBLIC_BASE:?}"
 
+scripts="$(cd "$(dirname "$0")" && pwd)"
 release="releases/$version"
 put() {
     aws s3 cp "$1" "$R2/$2" --endpoint-url "$ENDPOINT" --only-show-errors \
@@ -20,10 +21,15 @@ put "${dmg[0]}" "$release/HyperFarm.dmg"
 put "${setup[0]}" "$release/HyperFarm-setup.exe"
 put ./HyperFarm_universal.app.tar.gz "$release/HyperFarm.app.tar.gz"
 
-jq --arg base "$PUBLIC_BASE/$release" '
+# tauri-action 은 latest.json 의 notes 를 비워 둔다. 릴리스 본문(notes.md)이 있으면 그것을 실어 업데이트 화면에 보인다
+notes=""
+if [ -f notes.md ]; then
+    notes="$(cat notes.md)"
+fi
+jq --arg base "$PUBLIC_BASE/$release" --arg notes "$notes" '
     .platforms |= with_entries(
         .value.url = $base + (if (.key | startswith("windows")) then "/HyperFarm-setup.exe" else "/HyperFarm.app.tar.gz" end)
-    )' latest.json > latest.published.json
+    ) | if $notes != "" then .notes = $notes else . end' latest.json > latest.published.json
 put latest.published.json "$release/latest.json"
 
-"$(dirname "$0")/promote.sh" launcher "$version"
+"$scripts/promote.sh" launcher "$version"
