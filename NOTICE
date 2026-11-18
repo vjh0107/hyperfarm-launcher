@@ -1,16 +1,26 @@
 HyperFarm Launcher
 Copyright (C) 2026 HyperFarm
 
-The source code in this repository is licensed under the GNU General Public License,
-version 3 only (see LICENSE).
+Source code
+  Everything except the files listed below is licensed under the GNU General Public
+  License, version 3 only (see LICENSE).
 
-The following files are not covered by that license. They are the HyperFarm name, logo and
-artwork, and all rights to them are reserved. You may not use them in modified or
-redistributed versions of this software without permission:
+Artwork
+  The HyperFarm logo, background image, app icons and installer artwork are licensed under
+  the Creative Commons Attribution 4.0 International license (see LICENSES/CC-BY-4.0.txt).
+  Credit: "HyperFarm" with a link to https://hyperf.kr.
 
-  src/assets/images/
-  src-tauri/icons/
-  packaging/
+    src/assets/images/
+    src-tauri/icons/
+    packaging/
 
-The fonts in src/assets/fonts/ are licensed under the SIL Open Font License 1.1
-(see src/assets/fonts/OFL.txt).
+Fonts
+  Pretendard (Copyright (c) 2023 Kil Hyung-jin) and Paperlogy (Copyright (c) 2024 PT&) in
+  src/assets/fonts/ are licensed under the SIL Open Font License 1.1
+  (see LICENSES/OFL-1.1.txt).
+
+Name
+  "HyperFarm" and "하이퍼팜" are the names of the HyperFarm Minecraft server. The licenses
+  above do not grant permission to use these names to identify modified versions or other
+  products. Do not distribute a modified build under these names or in a way that suggests
+  it is the official launcher.

@@ -79,5 +79,6 @@ macOS 앱은 서명하지 않았다. 처음 열 때 Finder 에서 앱을 우클�
 
 ## 라이선스
 
-코드는 [GPL-3.0](LICENSE) 이다. 하이퍼팜 이름·로고·배경 그림은 이 라이선스에 들지 않는다 —
-[NOTICE](NOTICE) 를 본다. 글꼴(Pretendard, Paperlogy)은 SIL Open Font License 1.1 이다.
+코드는 [GPL-3.0](LICENSE), 로고·배경 그림·아이콘은 [CC BY 4.0](LICENSES/CC-BY-4.0.txt), 글꼴(Pretendard,
+Paperlogy)은 [SIL Open Font License 1.1](LICENSES/OFL-1.1.txt) 이다. "하이퍼팜" 이름은 어느 라이선스로도 주지
+않으므로 고친 빌드를 그 이름으로 배포하지 않는다. 자세한 것은 [NOTICE](NOTICE) 에 있다.
