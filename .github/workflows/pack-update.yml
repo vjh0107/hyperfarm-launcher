@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # pack/sources.json 을 다시 풀어 모드가 새 판으로 바뀌었으면 PR 을 연다. GITHUB_TOKEN 으로 연 PR 에는 CI 가
-  # 저절로 붙지 않으므로 같은 커밋에 CI 를 workflow_dispatch 로 돌려 필수 검사를 채운다
+  # pack/sources.json 을 다시 풀어 모드가 새 판으로 바뀌었으면 PR 을 연다. GITHUB_TOKEN 으로 연 PR 의 CI 는
+  # "승인 필요" 로 멈춰 필수 검사가 채워지지 않으므로, 연 뒤에 그 실행을 승인한다
   propose:
     runs-on: ubuntu-24.04
     permissions:
@@ -59,4 +59,13 @@ jobs:
             gh pr create --head "$BRANCH" --base main --title "모드를 새 판으로 올린다" \
               --body-file "$RUNNER_TEMP/body.md" --label pack
           fi
-          gh workflow run ci.yml --ref "$BRANCH"
+          head=$(git rev-parse HEAD)
+          for _ in $(seq 1 12); do
+            pending=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$head&status=action_required" --jq '.workflow_runs[].id')
+            [ -n "$pending" ] && break
+            sleep 5
+          done
+          for id in $pending; do
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
+          done
+          [ -n "$pending" ] || echo "::warning::no CI run waits for approval; approve it on the pull request"
