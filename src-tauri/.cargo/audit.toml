@@ -1,0 +1,13 @@
+# 우리가 직접 고를 수 없는 Tauri 의 하위 의존성 경고다. 새 Tauri 판이 이것들을 걷어내면 그때 지운다.
+[advisories]
+ignore = [
+    # gtk·glib: Linux 의 메뉴(muda)가 쓴다. 런처는 macOS·Windows 로만 배포한다
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2024-0429",
+    # zbus 계열: Linux 의 D-Bus(keyring 의 secret-service, opener, single-instance)가 쓴다
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
+    # chrono: Tauri 가 쓰는 serde_with 를 거쳐 들어온다. 보안 결함이 아니라 관리 중단 알림이다
+    "RUSTSEC-2026-0543",
+]
