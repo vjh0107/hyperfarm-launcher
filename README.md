@@ -58,6 +58,15 @@ Iris 가 Sodium 최신 beta 를 거부해 게임이 뜨지 않았던 것이 그 
 python3 pack/resolve.py
 ```
 
+하이퍼팜이 직접 만든 모드는 `pack.hyperf.kr` 에 판이 든 이름으로 올리고(`hyperfarm-client-1.2.0.jar`), `sources.json`
+의 목록에 `{"id": "hyperfarm-client", "url": "https://pack.hyperf.kr/launcher/mods/hyperfarm-client-1.2.0.jar"}`
+처럼 적는다. `resolve.py` 가 내려받아 해시와 크기를 박는다. launcher 는 파일 이름으로 바뀐 것을 가리므로 같은
+이름을 덮어쓰지 않는다.
+
+`pack-update.yml` 이 매주 월요일 새벽에 `sources.json` 을 다시 풀어, 바뀐 모드가 있으면 이전·새 판을 표로 적은
+`pack/update` PR 을 연다. CI 는 manifest 의 모양만 보므로, 게임이 뜨고 쉐이더를 켠 화면이 깨지지 않는지는 사람이
+확인한 뒤 머지한다.
+
 ## 테스트
 
 ```bash

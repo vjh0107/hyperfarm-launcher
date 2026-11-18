@@ -1,0 +1,62 @@
+name: Pack update
+
+on:
+  schedule:
+    - cron: "0 16 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pack-update
+  cancel-in-progress: false
+
+jobs:
+  # pack/sources.json 을 다시 풀어 모드가 새 판으로 바뀌었으면 PR 을 연다. GITHUB_TOKEN 으로 연 PR 에는 CI 가
+  # 저절로 붙지 않으므로 같은 커밋에 CI 를 workflow_dispatch 로 돌려 필수 검사를 채운다
+  propose:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: pack/update
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: cp pack/manifest.json "$RUNNER_TEMP/manifest.before.json"
+      - run: python3 pack/resolve.py
+      - run: python3 pack/check.py
+      - name: Open or update the pull request
+        run: |
+          if git diff --quiet -- pack/manifest.json; then
+            echo "The pack is up to date"
+            exit 0
+          fi
+          python3 pack/summary.py "$RUNNER_TEMP/manifest.before.json" pack/manifest.json > "$RUNNER_TEMP/changes.md"
+          {
+            echo "## 바꾼 것"
+            echo
+            echo "\`pack/sources.json\` 을 다시 풀었더니 아래가 새 판으로 바뀌었다."
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo "## 검증"
+            echo
+            echo "- [ ] \`installs_and_opens_the_game_window\` 로 게임이 뜨는지 봤다"
+            echo "- [ ] 쉐이더를 켜고 서버에 들어가 화면이 깨지지 않는지 봤다"
+          } > "$RUNNER_TEMP/body.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -qam "모드를 새 판으로 올린다"
+          git push -qf origin "$BRANCH"
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$BRANCH" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --head "$BRANCH" --base main --title "모드를 새 판으로 올린다" \
+              --body-file "$RUNNER_TEMP/body.md" --label pack
+          fi
+          gh workflow run ci.yml --ref "$BRANCH"
