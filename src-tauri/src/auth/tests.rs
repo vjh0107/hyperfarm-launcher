@@ -81,11 +81,13 @@ impl Fixture {
             .mount(&server)
             .await;
         Mock::given(path("/xsts"))
-            .respond_with(json(serde_json::json!({"Token": "xsts", "DisplayClaims": {"xui": [{"uhs": "hash", "xid": "2535"}]}})))
+            .respond_with(json(
+                serde_json::json!({"Token": "xsts", "DisplayClaims": {"xui": [{"uhs": "hash"}]}}),
+            ))
             .mount(&server)
             .await;
         Mock::given(path("/login"))
-            .respond_with(json(serde_json::json!({"access_token": "mc"})))
+            .respond_with(json(serde_json::json!({"access_token": minecraft_token()})))
             .mount(&server)
             .await;
         Mock::given(path("/profile"))
@@ -173,6 +175,19 @@ impl Fixture {
             })
             .count()
     }
+}
+
+// 실제 Minecraft 액세스 토큰처럼 xuid 클레임을 든 JWT 다
+fn minecraft_token() -> String {
+    use base64::Engine;
+    let encode = |value: serde_json::Value| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
+    };
+    format!(
+        "{}.{}.signature",
+        encode(serde_json::json!({"alg": "HS256"})),
+        encode(serde_json::json!({"xuid": "2535"}))
+    )
 }
 
 fn steve_ticket(login_hint: Option<&str>) -> LaunchTicket {

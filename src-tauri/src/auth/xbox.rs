@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -54,7 +56,6 @@ struct DisplayClaims {
 #[derive(Deserialize)]
 struct Xui {
     uhs: Option<String>,
-    xid: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -116,15 +117,12 @@ impl XboxClient {
                 .await,
             XBOX_FAILED,
         )?;
-        let user = xsts
+        let user_hash = xsts
             .display_claims
             .and_then(|claims| claims.xui)
-            .and_then(|users| users.into_iter().next());
-        let (Some(xsts_token), Some(user_hash), Some(xuid)) = (
-            xsts.token,
-            user.as_ref().and_then(|u| u.uhs.clone()),
-            user.and_then(|u| u.xid),
-        ) else {
+            .and_then(|users| users.into_iter().next())
+            .and_then(|user| user.uhs);
+        let (Some(xsts_token), Some(user_hash)) = (xsts.token, user_hash) else {
             return Err(LauncherError::new(Problem::LoginFailed, XBOX_FAILED));
         };
 
@@ -156,18 +154,28 @@ impl XboxClient {
             return Err(LauncherError::new(Problem::NoJavaEdition, NO_JAVA_EDITION));
         };
         Ok(MinecraftSession {
+            xuid: xuid(&minecraft_token).unwrap_or_default(),
             access_token: minecraft_token,
             player_id: dashed_uuid(&id)?,
             name,
-            xuid,
         })
     }
+}
+
+// Minecraft 용 XSTS 는 xid 를 싣지 않는다. 같은 값이 Minecraft 액세스 토큰의 xuid 클레임에 있다
+fn xuid(minecraft_token: &str) -> Option<String> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(minecraft_token.split('.').nth(1)?.trim_end_matches('='))
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    claims.get("xuid")?.as_str().map(str::to_string)
 }
 
 fn xbox<T>(result: Result<T, HttpError>, failure: &str) -> Result<T, LauncherError> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => {
+            log::warn!("Xbox sign-in step failed: {error}: {}", error.body());
             if let Some(described) = describe(error.body()) {
                 return Err(described);
             }

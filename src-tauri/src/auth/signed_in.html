@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>하이퍼팜</title>
+<style>
+  :root {
+    --ink: #222b36;
+    --muted: #6b7684;
+    --accent: {{accent}};
+    --accent-soft: {{accent_soft}};
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 20% -10%, #d9ecff 0%, transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, #e6f7ea 0%, transparent 55%),
+      linear-gradient(180deg, #eef5ff 0%, #f7f9fc 100%);
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    position: relative;
+    width: min(400px, 100%);
+    padding: 0 32px 28px;
+    overflow: hidden;
+    border-radius: 24px;
+    background: #fff;
+    text-align: center;
+    box-shadow: 0 24px 60px rgba(30, 50, 90, 0.12), 0 2px 6px rgba(30, 50, 90, 0.06);
+    animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .hero {
+    position: relative;
+    height: 132px;
+    margin: 0 -32px;
+    background: url("data:image/webp;base64,{{hero}}") center 45% / cover;
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 30%, #fff 100%);
+  }
+  .logo {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 72px;
+    height: 82px;
+    margin: -64px auto 12px;
+    filter: drop-shadow(0 8px 14px rgba(30, 50, 90, 0.2));
+  }
+  .status {
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin-bottom: 16px;
+    border-radius: 14px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    animation: pop 0.45s 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .status svg { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  p { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+  .hint {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(34, 43, 54, 0.07);
+    font-size: 12px;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+  @keyframes pop { from { opacity: 0; transform: scale(0.6); } }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="hero"></div>
+    <img class="logo" src="data:image/webp;base64,{{logo}}" alt="하이퍼팜">
+    <div class="status"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icon}}"/></svg></div>
+    <h1>{{title}}</h1>
+    <p>{{message}}</p>
+    <p class="hint">이 탭은 닫아도 돼요.</p>
+  </main>
+  <script>setTimeout(() => window.close(), 3000);</script>
+</body>
+</html>

@@ -1,11 +1,49 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-const PAGE: &str = "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>하이퍼팜</title></head>\
-<body style=\"font-family:sans-serif;text-align:center;padding-top:20vh\"><p>로그인을 마쳤어요. 이 탭은 닫아도 돼요.</p></body></html>";
+const PAGE: &str = include_str!("signed_in.html");
+const LOGO: &[u8] = include_bytes!("../../../src/assets/images/logo.webp");
+const HERO: &[u8] = include_bytes!("../../../src/assets/images/bg.webp");
+const CHECK: &str = "M20 6L9 17l-5-5";
+const CROSS: &str = "M6 6l12 12M18 6L6 18";
+
+fn page(query: &HashMap<String, String>) -> String {
+    let (title, message, icon, accent, soft) = match query.get("error").map(String::as_str) {
+        None => (
+            "로그인을 마쳤어요",
+            "하이퍼팜 런처로 돌아가 주세요. 곧 게임이 시작돼요.",
+            CHECK,
+            "#2a9a68",
+            "#e7f7ef",
+        ),
+        Some("access_denied") => (
+            "로그인을 취소했어요",
+            "다시 하려면 런처에서 다시 시도를 눌러 주세요.",
+            CROSS,
+            "#6b7684",
+            "#f0f3f7",
+        ),
+        Some(_) => (
+            "로그인하지 못했어요",
+            "런처로 돌아가 다시 시도해 주세요.",
+            CROSS,
+            "#f5535c",
+            "#fff1f2",
+        ),
+    };
+    PAGE.replace("{{hero}}", &STANDARD.encode(HERO))
+        .replace("{{logo}}", &STANDARD.encode(LOGO))
+        .replace("{{title}}", title)
+        .replace("{{message}}", message)
+        .replace("{{icon}}", icon)
+        .replace("{{accent}}", accent)
+        .replace("{{accent_soft}}", soft)
+}
 
 pub struct LoopbackReceiver {
     listener: TcpListener,
@@ -70,9 +108,10 @@ async fn answer(mut stream: TcpStream) -> Option<HashMap<String, String>> {
             .await;
         return None;
     }
+    let body = page(&query);
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{PAGE}",
-        PAGE.len()
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     );
     let _ = stream.write_all(response.as_bytes()).await;
     Some(query)
