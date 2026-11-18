@@ -1,0 +1,14 @@
+name: 제안
+description: 런처에 있었으면 하는 것
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 무엇이 불편한가요
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 어떻게 되면 좋을까요

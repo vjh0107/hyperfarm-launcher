@@ -1,0 +1,39 @@
+name: 런처 오류
+description: 런처가 켜지지 않거나 설치·로그인·실행 중에 멈출 때
+labels: [bug]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: 운영체제
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple 실리콘)
+        - macOS (Intel)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 런처 판
+      description: 런처 창 오른쪽 아래나 설정 화면 아래에 적혀 있어요.
+      placeholder: "0.1.1"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 무슨 일이 있었나요
+      description: 어느 화면에서 무엇을 눌렀고 무엇이 보였는지 적어 주세요. 오류 화면의 제목과 문구를 그대로 옮겨 주시면 좋아요.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: 런처 로그
+      description: |
+        macOS 는 `~/Library/Logs/kr.junhyung.hyperfarm.launcher/launcher.log`,
+        Windows 는 `%LOCALAPPDATA%\kr.junhyung.hyperfarm.launcher\logs\launcher.log` 예요.
+        게임이 바로 꺼졌다면 게임 폴더의 `logs/launcher-game.log` 도 붙여 주세요.
+      render: text

@@ -65,12 +65,14 @@ cd src-tauri && HYPERFARM_TEST_LIVE_HOME=/tmp/hyperfarm-live cargo test installs
 
 ## 배포
 
-`v*` 태그를 올리면 `release.yml` 이 macOS(universal dmg)와 Windows(NSIS, 사용자 단위 설치)를 만들어 GitHub
-Release 에 붙이고, `pack.hyperf.kr/launcher/` 에 `HyperFarm.dmg`, `HyperFarm-setup.exe`, `latest.json` 을 올린다.
-launcher 는 켜질 때 `latest.json` 을 보고 새 판을 받아 스스로 바꾼다. 판은 `package.json` 의 `version` 이다.
+`v*` 태그를 올리면 `release.yml` 이 태그와 판을 대조하고, macOS(universal dmg)와 Windows(NSIS, 사용자 단위
+설치)를 만들어 PR 라벨로 나눈 릴리스 노트와 함께 GitHub Release 에 붙인 뒤, `pack.hyperf.kr/launcher/` 에
+`HyperFarm.dmg`, `HyperFarm-setup.exe`, `latest.json` 을 올린다. launcher 는 켜질 때 `latest.json` 을 보고 새 판을
+받아 스스로 바꾼다. 판은 `package.json` 과 `src-tauri/Cargo.toml` 에 있고 `scripts/set-version.sh` 가 둘을 함께
+바꾼다. 작업 흐름과 릴리스 순서는 [CONTRIBUTING](CONTRIBUTING.md) 에 있다.
 
-저장소 secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`(업데이트 서명), `R2_ENDPOINT`,
-`R2_BUCKET`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`.
+`release` 환경 secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`(업데이트 서명),
+`R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`. 이 환경은 main 과 `v*` 태그에서만 열린다.
 
 macOS 앱은 서명하지 않았다. 처음 열 때 Finder 에서 앱을 우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보
 보호 및 보안에서 "그래도 열기" 를 누른다. Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.

@@ -1,0 +1,35 @@
+name: Audit
+
+on:
+  push:
+    branches: [main]
+    paths: ["src-tauri/Cargo.lock", "pnpm-lock.yaml"]
+  pull_request:
+    paths: ["src-tauri/Cargo.lock", "pnpm-lock.yaml"]
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1.2.7
+        with:
+          workingDirectory: src-tauri
+
+  pnpm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+        with:
+          install_args: node pnpm
+      - run: pnpm audit --prod
