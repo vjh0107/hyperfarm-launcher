@@ -35,10 +35,17 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+        # 만든 직후의 릴리스 목록에는 draft 가 아직 없을 수 있다. id 가 비면 tauri-action 이 빌드만 하고 아무것도
+        # 올리지 않은 채 성공하므로, 만드는 응답에서 id 를 받고 비었으면 여기서 멈춘다
         run: |
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "HyperFarm Launcher $GITHUB_REF_NAME" --generate-notes
-          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")" >> "$GITHUB_OUTPUT"
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$GITHUB_REF_NAME" -f name="HyperFarm Launcher $GITHUB_REF_NAME" \
+            -F draft=true -F generate_release_notes=true --jq .id)
+          if [ -z "$id" ]; then
+            echo "::error::the draft release has no id"
+            exit 1
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -78,7 +85,7 @@ jobs:
   # src/lib/launcher.ts, tauri.conf.json 의 updater). 판마다 releases/<판>/ 에 남긴 뒤 고정 이름을 그 판으로 올리므로
   # rollback.yml 이 옛 판을 다시 올릴 수 있다
   publish:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -90,12 +97,19 @@ jobs:
       R2: s3://${{ secrets.R2_BUCKET }}/launcher
       ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       PUBLIC_BASE: https://pack.hyperf.kr/launcher
+      RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Download the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release
+        run: |
+          mkdir release
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq '.[] | "\(.id) \(.name)"' |
+            while read -r id name; do
+              gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "release/$name"
+            done
+          ls -l release
+          test -s release/latest.json
       - name: Publish to R2
         run: scripts/publish-launcher.sh release "${GITHUB_REF_NAME#v}"
       - name: Check what players get
@@ -106,6 +120,4 @@ jobs:
             curl -sfI -A "hyperfarm-launcher/ci" "$url" >/dev/null
           done
       - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=true --jq .html_url
