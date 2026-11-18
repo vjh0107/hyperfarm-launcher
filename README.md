@@ -12,6 +12,13 @@
 - 설치할 판과 모드는 pack manifest(`pack/manifest.json`)가 정한다. 공개 모드와 쉐이더팩은 Modrinth 의 주소와
   sha512 로 플레이어 PC 가 직접 받고, 우리는 다시 올리지 않는다. manifest 에 없는 `mods/*.jar` 는 지운다.
 
+## 받기
+
+[GitHub Releases](https://github.com/vjh0107/hyperfarm-launcher/releases/latest) 에서 macOS(`.dmg`, Apple 실리콘·Intel)와
+Windows(`-setup.exe`)용을 받는다. 같은 파일을 [하이퍼팜 접속 안내](https://hyperf.kr/guide) 에서도 받을 수 있다. 설치한
+런처는 켜질 때 스스로 최신 판으로 바뀐다. Windows 판의 코드 서명은 아래 [Code signing policy](#code-signing-policy)
+를 따른다.
+
 ## 구성
 
 | 자리 | 무엇 |
@@ -77,7 +84,35 @@ cd src-tauri && HYPERFARM_TEST_LIVE_HOME=/tmp/hyperfarm-live cargo test installs
 macOS 앱은 서명하지 않았다. 처음 열 때 Finder 에서 앱을 우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보
 보호 및 보안에서 "그래도 열기" 를 누른다. Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- Committers and reviewers: [@vjh0107](https://github.com/vjh0107)
+- Approvers: [@vjh0107](https://github.com/vjh0107)
+
+Every Windows release is built from a `v*` tag by [`release.yml`](.github/workflows/release.yml) on GitHub Actions, and each
+signing request is approved by hand. See [Privacy](#privacy) for what the program sends over the network.
+
+## Privacy
+
+This program does not send any information to other networked systems except what is needed to sign the player in and
+start the game they asked to play:
+
+- **Microsoft, Xbox Live and Minecraft services** receive the player's sign-in to obtain a Minecraft session, as every
+  Minecraft launcher does. The Microsoft refresh token is stored only in the operating system's credential store on the
+  player's computer.
+- **hyperf.kr** receives the one-time launch ticket from the website's "Start game" button, to learn which account the
+  player signed in with on the website, and serves the player's skin head shown in the launcher window.
+- **Mojang, Fabric, Modrinth and pack.hyperf.kr** serve the game, mod and update files. The launcher downloads them
+  without sending account data.
+
+The launcher has no analytics or telemetry. The game itself connects to the HyperFarm server, whose
+[privacy policy](https://hyperf.kr/privacy) applies there.
+
 ## 라이선스
 
-코드는 [GPL-3.0](LICENSE) 이다. 하이퍼팜 이름·로고·배경 그림은 이 라이선스에 들지 않는다 —
-[NOTICE](NOTICE) 를 본다. 글꼴(Pretendard, Paperlogy)은 SIL Open Font License 1.1 이다.
+코드는 [GPL-3.0](LICENSE), 로고·배경 그림·아이콘은 [CC BY 4.0](LICENSES/CC-BY-4.0.txt), 글꼴(Pretendard,
+Paperlogy)은 [SIL Open Font License 1.1](LICENSES/OFL-1.1.txt) 이다. "하이퍼팜" 이름은 어느 라이선스로도 주지
+않으므로 고친 빌드를 그 이름으로 배포하지 않는다. 자세한 것은 [NOTICE](NOTICE) 에 있다.
