@@ -229,7 +229,7 @@ function onUpdate(event: UpdateEvent): void {
     return;
   }
   if (current !== progress.root || event.doneBytes === 0) {
-    progress.downloading("런처 업데이트 중", `런처 ${event.version}`, false);
+    progress.downloading("런처 업데이트 중", event.notes ? `${event.version} · ${event.notes}` : `런처 ${event.version}`, false);
     show(progress.root);
   }
   const total = event.totalBytes ?? 0;

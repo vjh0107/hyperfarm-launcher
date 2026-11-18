@@ -162,6 +162,10 @@ impl LaunchFlow {
         (self.emit)(event);
     }
 
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+
     pub fn reopen_sign_in(&self) -> Option<String> {
         self.sign_in_url.lock().unwrap().clone()
     }

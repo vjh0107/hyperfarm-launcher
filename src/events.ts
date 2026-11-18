@@ -31,7 +31,7 @@ export type LaunchEvent =
   | { state: "mismatch"; webPlayerId: string; webName: string; sessionPlayerId: string; sessionName: string };
 
 export type UpdateEvent =
-  | { state: "downloading"; version: string; doneBytes: number; totalBytes: number | null }
+  | { state: "downloading"; version: string; notes: string | null; doneBytes: number; totalBytes: number | null }
   | { state: "installing" };
 
 export interface AppInfo {
