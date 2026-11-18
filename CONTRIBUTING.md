@@ -29,5 +29,19 @@ scripts/set-version.sh 0.2.0
 ```
 
 이 변경을 PR 로 머지한 뒤 main 에서 `v0.2.0` 태그를 올리면 `release.yml` 이 판을 대조하고, macOS·Windows 를
-빌드해 GitHub Release 와 `pack.hyperf.kr/launcher/` 에 게시합니다. 설치된 런처는 다음에 켜질 때 그 판으로
-바뀝니다. 게시 job 은 `release` 환경에서만 돌고, 그 환경의 secrets 는 태그와 main 에서만 읽힙니다.
+빌드해 GitHub Release 에 붙인 뒤 `pack.hyperf.kr/launcher/releases/0.2.0/` 에 남기고 그 판을 지금 판으로 올립니다.
+웹의 받기 단추(`HyperFarm.dmg`, `HyperFarm-setup.exe`)와 updater(`latest.json`)가 보는 것은 그 고정 이름이고,
+설치된 런처는 다음에 켜질 때 그 판으로 바뀝니다. 게시 job 은 `release` 환경에서만 돌고, 그 환경의 secrets 는
+태그와 main 에서만 읽힙니다.
+
+## 되돌리기
+
+Actions 의 **Rollback** 을 손으로 돌립니다.
+
+| 되돌릴 것 | `kind` | `version` | 일어나는 일 |
+|---|---|---|---|
+| 런처 | `launcher` | 되돌아갈 판(`0.1.1`) | 고정 이름이 그 판을 가리키고, 설치된 런처는 다음에 켜질 때 그 판으로 내려갑니다 |
+| 모드 구성 | `pack` | 그 manifest 를 게시한 main 커밋 SHA | `manifest.json` 이 그 판을 가리키고, 다음 실행에서 모드가 그 구성으로 맞춰집니다 |
+
+되돌린 뒤에는 원인을 고친 판을 새로 내야 합니다. main 에 남은 것을 고치지 않고 다음 판을 내면 같은 문제가 다시
+나갑니다.

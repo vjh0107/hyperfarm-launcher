@@ -9,18 +9,26 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  # manifest 를 packs/<커밋>.json 으로 남긴 뒤 manifest.json 으로 올린다. 되돌리기는 rollback.yml 이 옛 커밋을 다시 올린다
   publish:
     runs-on: ubuntu-24.04
     environment: release
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2: s3://${{ secrets.R2_BUCKET }}/launcher
+      ENDPOINT: ${{ secrets.R2_ENDPOINT }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: python3 pack/check.py
-      - name: Upload the pack manifest
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
+      - name: Keep this pack
         run: >
-          aws s3 cp pack/manifest.json "s3://${{ secrets.R2_BUCKET }}/launcher/manifest.json"
-          --endpoint-url "${{ secrets.R2_ENDPOINT }}" --cache-control "no-cache"
+          aws s3 cp pack/manifest.json "$R2/packs/$GITHUB_SHA.json" --endpoint-url "$ENDPOINT" --only-show-errors
+          --cache-control "public, max-age=31536000, immutable" --content-type application/json
+      - run: scripts/promote.sh pack "$GITHUB_SHA"

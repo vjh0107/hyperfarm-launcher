@@ -75,8 +75,8 @@ jobs:
           args: --target ${{ matrix.target }}
 
   # 웹의 받기 단추와 런처의 자동 업데이트가 pack.hyperf.kr/launcher/ 의 고정 이름을 본다(hyperfarm-web 의
-  # src/lib/launcher.ts, tauri.conf.json 의 updater). 설치 파일을 먼저 올리고 latest.json 을 마지막에 올려야
-  # 런처가 아직 올라가지 않은 판을 받으려다 실패하지 않는다
+  # src/lib/launcher.ts, tauri.conf.json 의 updater). 판마다 releases/<판>/ 에 남긴 뒤 고정 이름을 그 판으로 올리므로
+  # rollback.yml 이 옛 판을 다시 올릴 수 있다
   publish:
     needs: build
     runs-on: ubuntu-24.04
@@ -89,18 +89,22 @@ jobs:
       AWS_DEFAULT_REGION: auto
       R2: s3://${{ secrets.R2_BUCKET }}/launcher
       ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      PUBLIC_BASE: https://pack.hyperf.kr/launcher
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Download the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release
-      - name: Upload the installers
-        working-directory: release
+      - name: Publish to R2
+        run: scripts/publish-launcher.sh release "${GITHUB_REF_NAME#v}"
+      - name: Check what players get
         run: |
-          upload() { aws s3 cp "$1" "$R2/$2" --endpoint-url "$ENDPOINT" --cache-control "no-cache"; }
-          upload ./*_universal.dmg HyperFarm.dmg
-          upload ./*_x64-setup.exe HyperFarm-setup.exe
-          upload latest.json latest.json
+          latest=$(curl -sf -A "hyperfarm-launcher/ci" "$PUBLIC_BASE/latest.json")
+          [ "$(jq -r .version <<<"$latest")" = "${GITHUB_REF_NAME#v}" ]
+          for url in $(jq -r '.platforms[].url' <<<"$latest" | sort -u); do
+            curl -sfI -A "hyperfarm-launcher/ci" "$url" >/dev/null
+          done
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
