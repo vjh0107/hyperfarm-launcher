@@ -5,10 +5,46 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  # 태그와 package.json·Cargo.toml 의 판이 다르면 latest.json 이 실제와 다른 판을 알려, 설치된 런처가
+  # 같은 판을 계속 다시 받거나 새 판을 모르고 지나간다. 빌드에 들어가기 전에 여기서 멈춘다
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          package=$(jq -r .version package.json)
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -1)
+          if [ "$tag" != "$package" ] || [ "$tag" != "$cargo" ]; then
+            echo "::error::tag $tag, package.json $package and Cargo.toml $cargo must agree"
+            exit 1
+          fi
+      - name: Create a draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "HyperFarm Launcher $GITHUB_REF_NAME" --generate-notes
+          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
+    permissions:
+      contents: write
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -19,33 +55,34 @@ jobs:
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - name: Add the macOS Intel target
-        if: matrix.platform == 'macos-latest'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - name: Add the macOS targets
+        if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: HyperFarm Launcher ${{ github.ref_name }}
-          releaseDraft: true
+          releaseId: ${{ needs.prepare.outputs.release-id }}
           includeUpdaterJson: true
           args: --target ${{ matrix.target }}
 
   # 웹의 받기 단추와 런처의 자동 업데이트가 pack.hyperf.kr/launcher/ 의 고정 이름을 본다(hyperfarm-web 의
   # src/lib/launcher.ts, tauri.conf.json 의 updater). 설치 파일을 먼저 올리고 latest.json 을 마지막에 올려야
-  # 런처가 아직 올라가지 않은 판을 받으려다 실패하지 않는다.
+  # 런처가 아직 올라가지 않은 판을 받으려다 실패하지 않는다
   publish:
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    environment: release
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
@@ -55,7 +92,7 @@ jobs:
     steps:
       - name: Download the release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release
       - name: Upload the installers
         working-directory: release
@@ -66,5 +103,5 @@ jobs:
           upload latest.json latest.json
       - name: Publish the release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

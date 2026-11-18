@@ -1,0 +1,14 @@
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: 새로 생긴 것
+      labels: [enhancement]
+    - title: 고친 것
+      labels: [bug]
+    - title: 모드 구성
+      labels: [pack]
+    - title: 의존성
+      labels: [dependencies]
+    - title: 그 밖의 것
+      labels: ["*"]
