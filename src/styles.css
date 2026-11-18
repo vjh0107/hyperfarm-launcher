@@ -263,6 +263,12 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.heading .subtitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .body {
   max-width: 356px;
   line-height: 1.6;
