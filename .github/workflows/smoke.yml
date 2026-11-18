@@ -1,0 +1,84 @@
+name: Install smoke
+
+on:
+  workflow_run:
+    workflows: [Release, Rollback]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 플레이어가 받는 것(pack.hyperf.kr/launcher/ 의 고정 이름)을 실제로 깔고 켜 본다. 빌드가 초록이어도 게시가
+# 다른 판을 가리키거나, 설치 파일이 링크를 등록하지 않거나, 켜자마자 죽으면 여기서 드러난다
+jobs:
+  windows:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    env:
+      BASE: https://pack.hyperf.kr/launcher
+    steps:
+      - name: Install
+        shell: pwsh
+        run: |
+          $headers = @{ "User-Agent" = "hyperfarm-launcher/smoke" }
+          $latest = Invoke-RestMethod -Uri "$env:BASE/latest.json" -Headers $headers
+          "VERSION=$($latest.version)" >> $env:GITHUB_ENV
+          Invoke-WebRequest -Uri "$env:BASE/HyperFarm-setup.exe" -Headers $headers -OutFile setup.exe
+          Start-Process -FilePath .\setup.exe -ArgumentList "/S" -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\HyperFarm" -Recurse -Filter HyperFarm.exe | Select-Object -First 1
+          if (-not $exe) { throw "HyperFarm.exe is not installed" }
+          "EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+      - name: Check the version and the link
+        shell: pwsh
+        run: |
+          $installed = (Get-Item $env:EXE).VersionInfo.ProductVersion
+          if ($installed -ne $env:VERSION) { throw "installed $installed but latest.json says $env:VERSION" }
+          if (-not (Test-Path "HKCU:\Software\Classes\hyperfarm\shell\open\command")) { throw "hyperfarm:// is not registered" }
+          (Get-ItemProperty "HKCU:\Software\Classes\hyperfarm\shell\open\command")."(default)"
+      - name: Start
+        shell: pwsh
+        env:
+          HYPERFARM_HOME: ${{ runner.temp }}\hyperfarm-home
+        run: |
+          $process = Start-Process -FilePath $env:EXE -PassThru
+          Start-Sleep -Seconds 15
+          if ($process.HasExited) { throw "the launcher exited with $($process.ExitCode)" }
+          Stop-Process -Id $process.Id -Force
+      - name: Uninstall
+        shell: pwsh
+        run: |
+          $uninstaller = Join-Path (Split-Path $env:EXE) "uninstall.exe"
+          Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path $env:EXE) { throw "the launcher is still installed" }
+
+  macos:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    env:
+      BASE: https://pack.hyperf.kr/launcher
+    steps:
+      - name: Check the disk image
+        run: |
+          version=$(curl -sf -A "hyperfarm-launcher/smoke" "$BASE/latest.json" | jq -r .version)
+          curl -sf -A "hyperfarm-launcher/smoke" "$BASE/HyperFarm.dmg" -o HyperFarm.dmg
+          hdiutil attach -nobrowse -readonly -mountpoint mnt HyperFarm.dmg
+          plist=mnt/HyperFarm.app/Contents/Info.plist
+          installed=$(plutil -extract CFBundleShortVersionString raw "$plist")
+          [ "$installed" = "$version" ] || { echo "::error::dmg has $installed but latest.json says $version"; exit 1; }
+          plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$plist" | grep -qx hyperfarm
+          lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q x86_64
+          lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q arm64
+          test -L mnt/Applications
+          cp -R mnt/HyperFarm.app .
+          hdiutil detach mnt
+      - name: Start
+        env:
+          HYPERFARM_HOME: ${{ runner.temp }}/hyperfarm-home
+        run: |
+          ./HyperFarm.app/Contents/MacOS/HyperFarm &
+          pid=$!
+          sleep 15
+          kill -0 "$pid" || { echo "::error::the launcher exited"; exit 1; }
+          kill "$pid"
