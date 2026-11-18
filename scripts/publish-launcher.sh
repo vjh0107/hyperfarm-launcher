@@ -7,6 +7,7 @@ files="${1:?usage: scripts/publish-launcher.sh <release-files-dir> <version>}"
 version="${2:?usage: scripts/publish-launcher.sh <release-files-dir> <version>}"
 : "${R2:?}" "${ENDPOINT:?}" "${PUBLIC_BASE:?}"
 
+scripts="$(cd "$(dirname "$0")" && pwd)"
 release="releases/$version"
 put() {
     aws s3 cp "$1" "$R2/$2" --endpoint-url "$ENDPOINT" --only-show-errors \
@@ -26,4 +27,4 @@ jq --arg base "$PUBLIC_BASE/$release" '
     )' latest.json > latest.published.json
 put latest.published.json "$release/latest.json"
 
-"$(dirname "$0")/promote.sh" launcher "$version"
+"$scripts/promote.sh" launcher "$version"
