@@ -1,0 +1,39 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 되돌릴 것
+        type: choice
+        options: [launcher, pack]
+        required: true
+      version:
+        description: launcher 는 판(예 0.1.1), pack 은 manifest 를 게시한 커밋 SHA
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2: s3://${{ secrets.R2_BUCKET }}/launcher
+      ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Promote
+        env:
+          KIND: ${{ inputs.kind }}
+          VERSION: ${{ inputs.version }}
+        run: scripts/promote.sh "$KIND" "$VERSION"
