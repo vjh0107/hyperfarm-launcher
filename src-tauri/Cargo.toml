@@ -17,6 +17,7 @@ tauri-build = { version = "2.7.5", features = [] }
 [dependencies]
 base64 = "0.23.1"
 dirs = "7.0.0"
+discord-rich-presence = "1.1.0"
 futures-util = "0.3.34"
 hex = "0.4.3"
 keyring = "4.2.0"

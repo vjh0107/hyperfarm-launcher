@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use tokio::process::Child;
 
 use crate::auth::microsoft::{BrowserOpener, MicrosoftClient, MicrosoftEndpoints};
 use crate::auth::store::KeyringAccountStore;
@@ -129,13 +130,17 @@ impl LaunchFlow {
         true
     }
 
-    pub async fn run(&self, step: Step) {
+    pub async fn run(&self, step: Step) -> Option<Child> {
         if self.busy.swap(true, Ordering::SeqCst) {
             log::info!("A launch is already running; ignoring {step:?}");
-            return;
+            return None;
         }
+        let mut game = None;
         let event = match self.launch(step).await {
-            Ok(()) => LaunchEvent::Launched,
+            Ok(child) => {
+                game = Some(child);
+                LaunchEvent::Launched
+            }
             Err(AuthError::Mismatch {
                 session,
                 web_player_id,
@@ -160,6 +165,7 @@ impl LaunchFlow {
         };
         self.busy.store(false, Ordering::SeqCst);
         (self.emit)(event);
+        game
     }
 
     pub fn is_busy(&self) -> bool {
@@ -198,7 +204,7 @@ impl LaunchFlow {
         self.settings.game_directory(&self.config.home)
     }
 
-    async fn launch(&self, step: Step) -> Result<(), AuthError> {
+    async fn launch(&self, step: Step) -> Result<Child, AuthError> {
         (self.emit)(LaunchEvent::Checking);
         let ticket = self.redeem().await;
         let accepted = if step == Step::ContinueAnyway {
@@ -258,14 +264,13 @@ impl LaunchFlow {
             launcher_version: env!("CARGO_PKG_VERSION"),
         };
         let command = launch::command(&installation, &session, &options, &self.platform);
-        launch::start(
+        Ok(launch::start(
             &command,
             &installation.game_directory,
             layout.logs().join(GAME_LOG),
             WINDOW_TIMEOUT,
         )
-        .await?;
-        Ok(())
+        .await?)
     }
 
     // ticket 은 어느 계정으로 로그인할지 고르는 힌트일 뿐이라, 바꾸지 못해도 실행은 멈추지 않는다
