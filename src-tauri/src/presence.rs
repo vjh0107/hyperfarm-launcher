@@ -52,8 +52,9 @@ fn publish(
         }
     };
     let activity = Activity::new()
+        .name("하이퍼팜")
         .timestamps(Timestamps::new().start(started))
-        .buttons(vec![Button::new("홈페이지", homepage)]);
+        .buttons(vec![Button::new("함께 플레이하기", homepage)]);
     // 응답을 읽지 않으면 30초마다 쌓인다
     match client.set_activity(activity).and_then(|()| client.recv()) {
         Ok(_) => Some(client),
