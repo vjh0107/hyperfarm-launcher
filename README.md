@@ -16,8 +16,7 @@
 
 [GitHub Releases](https://github.com/vjh0107/hyperfarm-launcher/releases/latest) 에서 macOS(`.dmg`, Apple 실리콘·Intel)와
 Windows(`-setup.exe`)용을 받는다. 같은 파일을 [하이퍼팜 접속 안내](https://hyperf.kr/guide) 에서도 받을 수 있다. 설치한
-런처는 켜질 때 스스로 최신 판으로 바뀐다. Windows 판의 코드 서명은 아래 [Code signing policy](#code-signing-policy)
-를 따른다.
+런처는 켜질 때 스스로 최신 판으로 바뀐다.
 
 ## 구성
 
@@ -99,17 +98,6 @@ cd src-tauri && HYPERFARM_TEST_LIVE_HOME=/tmp/hyperfarm-live cargo test installs
 
 macOS 앱은 서명하지 않았다. 처음 열 때 Finder 에서 앱을 우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보
 보호 및 보안에서 "그래도 열기" 를 누른다. Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.
-
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
-
-- Committers and reviewers: [@vjh0107](https://github.com/vjh0107)
-- Approvers: [@vjh0107](https://github.com/vjh0107)
-
-Every Windows release is built from a `v*` tag by [`release.yml`](.github/workflows/release.yml) on GitHub Actions, and each
-signing request is approved by hand. See [Privacy](#privacy) for what the program sends over the network.
 
 ## Privacy
 
