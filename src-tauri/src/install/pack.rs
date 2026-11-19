@@ -15,6 +15,7 @@ pub struct PackManifest {
     pub shaderpacks: Vec<PackFile>,
     #[serde(default)]
     pub default_options: BTreeMap<String, String>,
+    pub server_resource_pack: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]

@@ -20,7 +20,10 @@ def fail(message):
 manifest = json.loads((PACK / "manifest.json").read_text())
 sources = json.loads((PACK / "sources.json").read_text())
 
-for key in ("minecraftVersion", "fabricLoaderVersion", "server"):
+if not manifest.get("serverResourcePack", "").startswith("https://"):
+    fail("serverResourcePack must be an https URL")
+
+for key in ("minecraftVersion", "fabricLoaderVersion", "server", "serverResourcePack"):
     if not isinstance(manifest.get(key), str) or not manifest[key]:
         fail(f"{key} is missing")
     if key in sources and sources[key] != manifest[key]:

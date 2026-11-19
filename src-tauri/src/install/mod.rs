@@ -3,6 +3,7 @@ pub mod library;
 pub mod metadata;
 pub mod pack;
 pub mod rules;
+mod server_pack;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use metadata::{
 };
 use pack::{PackFile, PackManifest};
 use rules::{Argument, Platform, parse_arguments};
+use server_pack::ServerPack;
 
 const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const JAVA_RUNTIMES: &str = "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
@@ -170,6 +172,17 @@ impl GameInstaller {
             ));
         }
         dedupe(&mut tasks);
+        let server_pack = pack
+            .server_resource_pack
+            .as_deref()
+            .map(|url| ServerPack::new(url, &self.layout.root));
+        let pending_pack = match &server_pack {
+            Some(server_pack) => server_pack.prepare(self.http.client()).await,
+            None => None,
+        };
+        if let Some(pending) = &pending_pack {
+            tasks.push(pending.task.clone());
+        }
 
         let missing = self.downloader.missing(tasks).await;
         if !missing.is_empty() {
@@ -186,6 +199,12 @@ impl GameInstaller {
             self.downloader
                 .fetch_all(&missing, &self.layout.root, listener.progress())
                 .await?;
+        }
+        // 못 두어도 접속하면 서버가 보내 주므로 게임은 그대로 켠다
+        if let (Some(server_pack), Some(pending)) = (&server_pack, pending_pack)
+            && let Err(error) = server_pack.finish(pending).await
+        {
+            log::warn!("Could not keep the server resource pack: {}", error.message);
         }
         self.finish_runtime(&runtime, &component).await?;
         prune_mods(&pack.mods, &self.layout.mods()).await?;
