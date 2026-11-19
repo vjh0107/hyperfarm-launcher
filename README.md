@@ -116,6 +116,8 @@ start the game they asked to play:
   player signed in with on the website, and serves the player's skin head shown in the launcher window.
 - **Mojang, Fabric, Modrinth and pack.hyperf.kr** serve the game, mod and update files. The launcher downloads them
   without sending account data.
+- **Discord**, if it is running on the player's computer, is told over its local connection that the player is playing,
+  with the start time, so that it can show this on the player's profile. Nothing is sent when Discord is not running.
 
 The launcher has no analytics or telemetry. The game itself connects to the HyperFarm server, whose
 [privacy policy](https://hyperf.kr/privacy) applies there.

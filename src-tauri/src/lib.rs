@@ -4,11 +4,13 @@ mod flow;
 mod http;
 mod install;
 mod launch;
+mod presence;
 mod settings;
 mod ticket;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -17,6 +19,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
+use tokio::process::Child;
 
 use flow::{LaunchEvent, LaunchFlow, Step};
 use settings::{LauncherConfig, LauncherSettings};
@@ -50,19 +53,42 @@ enum UpdateEvent {
     Installing,
 }
 
+#[derive(Default)]
+struct Playing(AtomicBool);
+
 #[tauri::command]
 async fn begin(app: AppHandle, flow: State<'_, Flow>) -> Result<(), ()> {
     if update(&app).await {
         return Ok(());
     }
-    flow.run(Step::Retry).await;
+    stay_while_playing(&app, flow.run(Step::Retry).await);
     Ok(())
 }
 
 #[tauri::command]
-async fn run_step(step: Step, flow: State<'_, Flow>) -> Result<(), ()> {
-    flow.run(step).await;
+async fn run_step(app: AppHandle, step: Step, flow: State<'_, Flow>) -> Result<(), ()> {
+    stay_while_playing(&app, flow.run(step).await);
     Ok(())
+}
+
+// 창은 닫고 게임이 도는 동안 남아 Discord 에 플레이 중을 띄운다. 게임이 꺼지면 함께 꺼진다
+fn stay_while_playing(app: &AppHandle, game: Option<Child>) {
+    let Some(mut game) = game else {
+        return;
+    };
+    app.state::<Playing>().0.store(true, Ordering::SeqCst);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(CLOSE_AFTER_LAUNCH).await;
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.destroy();
+        }
+        #[cfg(target_os = "macos")]
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        let homepage = app.state::<Flow>().web_base().to_string();
+        presence::show_until_exit(&mut game, homepage).await;
+        app.exit(0);
+    });
 }
 
 #[tauri::command]
@@ -261,13 +287,6 @@ pub fn run() {
             });
             let emitter = handle.clone();
             let emit = Arc::new(move |event: LaunchEvent| {
-                if matches!(event, LaunchEvent::Launched) {
-                    let closing = emitter.clone();
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(CLOSE_AFTER_LAUNCH).await;
-                        closing.exit(0);
-                    });
-                }
                 let _ = emitter.emit(LAUNCH_EVENT, event);
             });
             app.manage::<Flow>(Arc::new(LaunchFlow::new(
@@ -285,6 +304,11 @@ pub fn run() {
             }
             let linked = handle.clone();
             app.deep_link().on_open_url(move |event| {
+                // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다
+                if linked.state::<Playing>().0.load(Ordering::SeqCst) {
+                    log::info!("Ignoring a launch link while the game is running");
+                    return;
+                }
                 if !accept_links(&linked, event.urls().into_iter().map(String::from)) {
                     return;
                 }
@@ -295,11 +319,12 @@ pub fn run() {
                     if !flow.is_busy() && update(&app).await {
                         return;
                     }
-                    flow.run(Step::Retry).await;
+                    stay_while_playing(&app, flow.run(Step::Retry).await);
                 });
             });
             Ok(())
         })
+        .manage(Playing::default())
         .invoke_handler(tauri::generate_handler![
             begin,
             run_step,
@@ -314,8 +339,17 @@ pub fn run() {
             choose_game_directory,
             quit,
         ])
-        .run(tauri::generate_context!())
-        .expect("the launcher window failed to start");
+        .build(tauri::generate_context!())
+        .expect("the launcher window failed to start")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+                && app.state::<Playing>().0.load(Ordering::SeqCst)
+            {
+                api.prevent_exit();
+            }
+        });
 }
 
 #[cfg(test)]
