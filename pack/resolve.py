@@ -96,6 +96,7 @@ def main():
         "minecraftVersion": game_version,
         "fabricLoaderVersion": sources["fabricLoaderVersion"],
         "server": sources["server"],
+        "serverResourcePack": sources["serverResourcePack"],
         "mods": resolve(sources["mods"], ["fabric"], game_version),
         "shaderpacks": resolve(sources["shaderpacks"], ["iris"], game_version),
         "defaultOptions": sources["defaultOptions"],

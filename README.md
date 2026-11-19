@@ -63,6 +63,13 @@ python3 pack/resolve.py
 처럼 적는다. `resolve.py` 가 내려받아 해시와 크기를 박는다. launcher 는 파일 이름으로 바뀐 것을 가리므로 같은
 이름을 덮어쓰지 않는다.
 
+`serverResourcePack` 은 운영 게임서버가 접속 때 보내는 리소스팩의 공개 주소다. launcher 는 실행할 때마다 그 주소의
+ETag 를 보고 바뀌었으면 받아, 클라이언트가 서버 팩을 찾는 `downloads/<팩 UUID>/<SHA-1>` 에 둔다. 팩 UUID 는
+CraftEngine 이 정하는 대로 SHA-1 16진 문자열의 `UUID.nameUUIDFromBytes` 다. 그러면 접속할 때 클라이언트가
+`Returning cached file since actual hash matches requested` 를 남기고 받지 않는다. 주소가 404 이거나 받지 못하면 서버가
+보내는 것을 그대로 받는다. 게임서버 차트의 `storage.resourcepackCdn`·`resourcepackUploadPath` 를 바꾸면 이 값도 함께
+바꾼다.
+
 `pack-update.yml` 이 매주 월요일 새벽에 `sources.json` 을 다시 풀어, 바뀐 모드가 있으면 이전·새 판을 표로 적은
 `pack/update` PR 을 연다. CI 는 manifest 의 모양만 보므로, 게임이 뜨고 쉐이더를 켠 화면이 깨지지 않는지는 사람이
 확인한 뒤 머지한다.
