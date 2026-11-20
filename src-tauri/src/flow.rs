@@ -311,12 +311,14 @@ impl LaunchFlow {
                 if step == Step::Play && kept.is_some() {
                     log::info!("The prepared launch is over an hour old; preparing again");
                 }
-                self.prepare(step).await?
+                self.prepare(step, sign_outs).await?
             }
         };
         let server = prepared.installation.server.clone();
-        // 받는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 시작 버튼이 다시 로그인부터 한다
-        if self.sign_outs.load(Ordering::SeqCst) != sign_outs {
+        // 준비하는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 로그아웃 뒤에 끝난 인증이 계정을 저장소에
+        // 다시 써 넣었을 수 있어 한 번 더 지운다. 그래야 시작 버튼이 로그인부터 다시 한다
+        if self.signed_out_since(sign_outs) {
+            self.authenticator.sign_out();
             log::info!("Signed out while preparing; the next start signs in again");
             return Ok(Outcome::Ready(server));
         }
@@ -327,7 +329,11 @@ impl LaunchFlow {
         self.start(prepared).await.map(Outcome::Started)
     }
 
-    async fn prepare(&self, step: Step) -> Result<Prepared, AuthError> {
+    fn signed_out_since(&self, sign_outs: u64) -> bool {
+        self.sign_outs.load(Ordering::SeqCst) != sign_outs
+    }
+
+    async fn prepare(&self, step: Step, sign_outs: u64) -> Result<Prepared, AuthError> {
         (self.emit)(LaunchEvent::Checking);
         let ticket = self.redeem().await;
         let accepted = if step == Step::ContinueAnyway {
@@ -363,10 +369,12 @@ impl LaunchFlow {
                 }
             }
         };
-        (self.emit)(LaunchEvent::SignedIn {
-            player_id: session.player_id.clone(),
-            name: session.name.clone(),
-        });
+        if !self.signed_out_since(sign_outs) {
+            (self.emit)(LaunchEvent::SignedIn {
+                player_id: session.player_id.clone(),
+                name: session.name.clone(),
+            });
+        }
 
         let pack = pack::load(&self.http, &self.config.pack_manifest).await?;
         (self.emit)(LaunchEvent::Preparing {
