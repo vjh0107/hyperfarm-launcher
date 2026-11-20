@@ -24,6 +24,10 @@
 - 같은 때에 키가 정해지지 않은(`key.keyboard.unknown`) 조작은 모두 F24 에 묶는다. 26.3 은 그런 조작을 Fn·IME 전환
   같은 알 수 없는 키에도 일으켜, 기본으로 키가 없는 시네마틱 카메라가 저절로 켜진다([MC-311949](https://bugs.mojang.com/browse/MC-311949)).
   플레이어가 실제 키를 정한 조작은 건드리지 않는다.
+- 같은 때에 Windows 에 AMD 디스플레이 어댑터가 있고 `preferredGraphicsBackend` 가 없거나 `default` 면 `vulkan` 으로
+  바꾼다. 26.3 의 `default` 는 OpenGL 을 먼저 고르는데, AMD 의 OpenGL 드라이버(`atio6axx.dll`)는 서버 팩으로 텍스처
+  아틀라스를 만든 직후 0xC0000005(종료 코드 -1073741819)로 게임을 죽인다(RX 6600·6800, 2026-11-20 문의). Iris 쉐이더는
+  Vulkan 에서 꺼진다. 플레이어가 고른 `opengl`·`vulkan` 은 건드리지 않는다.
 
 ## 받기
 
