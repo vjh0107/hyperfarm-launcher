@@ -13,6 +13,20 @@ const TITLE_BAR: f64 = 32.0;
 const DATA_VERSION: u32 = 5023;
 const GUI_SCALE: &str = "guiScale";
 const FORCE_UNICODE_FONT: &str = "forceUnicodeFont";
+const KEY_PREFIX: &str = "key_";
+// 26.3 과 지금 모드 구성에서 기본으로 키가 없는 조작이다. 게임이 처음 파일을 쓰기 전이나 그 모드가 새로 들어온 첫 실행에는
+// 줄이 없어 게임이 Not bound 로 두므로, 줄이 없으면 미리 F24 로 넣는다
+const UNBOUND_BY_DEFAULT: [&str; 7] = [
+    "key_key.smoothCamera",
+    "key_key.spectatorOutlines",
+    "key_key.dynamic_fps.toggle_forced",
+    "key_key.dynamic_fps.toggle_disabled",
+    "key_key.entityculling.toggle",
+    "key_key.entityculling.toggleBoxes",
+    "key_key.hyperfarm.voice.deafen",
+];
+const UNBOUND: &str = "key.keyboard.unknown";
+const UNPRESSED_KEY: &str = "key.keyboard.f24";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorkArea {
@@ -56,19 +70,30 @@ pub async fn prepare(
     let Some(text) = edit(existing.as_deref(), defaults, scale) else {
         return;
     };
+    let before = existing.as_deref().and_then(|old| option(old, GUI_SCALE));
+    let after = option(&text, GUI_SCALE);
+    let set_scale = if after == before { None } else { after };
     match write(file, &text).await {
-        Ok(()) => {
-            if let (Some(area), Some(scale)) = (work_area, scale) {
-                log::info!(
-                    "Set the default GUI scale for a {}x{} work area at {}x to {scale}",
-                    area.width,
-                    area.height,
-                    area.scale_factor
-                );
-            }
-        }
+        Ok(()) => match (work_area, set_scale) {
+            (Some(area), Some(scale)) => log::info!(
+                "Set the default GUI scale in {} for a {}x{} work area at {}x to {scale}",
+                file.display(),
+                area.width,
+                area.height,
+                area.scale_factor
+            ),
+            _ => log::info!("Updated {}", file.display()),
+        },
         Err(error) => log::warn!("Could not write {}: {error}", file.display()),
     }
+}
+
+fn option<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
+    contents
+        .lines()
+        .rev()
+        .find_map(|line| entry(line).filter(|(name, _)| *name == key))
+        .map(|(_, value)| value)
 }
 
 async fn write(file: &Path, text: &str) -> std::io::Result<()> {
@@ -89,34 +114,63 @@ pub fn edit(
     let Some(text) = existing.filter(|text| !text.trim().is_empty()) else {
         return created(defaults, gui_scale);
     };
-    let scale = gui_scale?;
+    let ending = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
-    let last_index = |key: &str| {
-        lines
-            .iter()
-            .rposition(|line| entry(line).is_some_and(|(name, _)| name == key))
-    };
-    let value = |index: Option<usize>| {
-        index
-            .and_then(|index| entry(&lines[index]))
-            .map(|(_, value)| value)
-    };
-    let current = last_index(GUI_SCALE);
-    if value(current)
-        .and_then(|value| value.parse::<u32>().ok())
-        .is_some_and(|chosen| chosen > 0)
+    let mut changed = bind_unbound_keys(&mut lines, ending);
+    if let Some(scale) = gui_scale
+        && !value(&lines, GUI_SCALE)
+            .and_then(|value| value.parse::<u32>().ok())
+            .is_some_and(|chosen| chosen > 0)
     {
-        return None;
+        let unicode = value(&lines, FORCE_UNICODE_FONT) == Some("true");
+        let scale = even_for_unicode(scale, unicode).to_string();
+        changed |= set(&mut lines, GUI_SCALE, &scale, ending);
     }
-    let unicode = value(last_index(FORCE_UNICODE_FONT)) == Some("true");
-    let line = format!("{GUI_SCALE}:{}", even_for_unicode(scale, unicode));
+    changed.then(|| lines.concat())
+}
+
+// 26.3 은 입력을 SDL 로 받으면서 키를 정하지 않은 동작을 Fn·IME 전환 같은 알 수 없는 키에도 일으킨다(MC-311949,
+// 26.4 Snapshot 2 에서 고침). 기본으로 키가 없는 시네마틱 카메라가 저절로 켜지고 모드의 끄기 키도 함께 눌린다.
+// 실제 키에 묶인 동작은 일어나지 않으므로, 키보드에 거의 없는 F24 에 묶는다
+fn bind_unbound_keys(lines: &mut Vec<String>, ending: &str) -> bool {
+    let mut changed = false;
+    for line in lines.iter_mut() {
+        if let Some((name, UNBOUND)) = entry(line)
+            && name.starts_with(KEY_PREFIX)
+        {
+            let tail = line[content(line).len()..].to_string();
+            *line = format!("{name}:{UNPRESSED_KEY}{tail}");
+            changed = true;
+        }
+    }
+    for key in UNBOUND_BY_DEFAULT {
+        if value(lines, key).is_none() {
+            changed |= set(lines, key, UNPRESSED_KEY, ending);
+        }
+    }
+    changed
+}
+
+fn value<'a>(lines: &'a [String], key: &str) -> Option<&'a str> {
+    lines
+        .iter()
+        .rev()
+        .find_map(|line| entry(line).filter(|(name, _)| *name == key))
+        .map(|(_, value)| value)
+}
+
+fn set(lines: &mut Vec<String>, key: &str, value: &str, ending: &str) -> bool {
+    let line = format!("{key}:{value}");
+    let current = lines
+        .iter()
+        .rposition(|candidate| entry(candidate).is_some_and(|(name, _)| name == key));
     match current {
+        Some(index) if content(&lines[index]) == line => return false,
         Some(index) => {
-            let ending = lines[index][content(&lines[index]).len()..].to_string();
-            lines[index] = format!("{line}{ending}");
+            let tail = lines[index][content(&lines[index]).len()..].to_string();
+            lines[index] = format!("{line}{tail}");
         }
         None => {
-            let ending = if text.contains("\r\n") { "\r\n" } else { "\n" };
             if let Some(last) = lines.last_mut()
                 && !last.ends_with('\n')
             {
@@ -125,16 +179,18 @@ pub fn edit(
             lines.push(format!("{line}{ending}"));
         }
     }
-    Some(lines.concat())
+    true
 }
 
 fn created(defaults: &BTreeMap<String, String>, gui_scale: Option<u32>) -> Option<String> {
-    if defaults.is_empty() && gui_scale.is_none() {
-        return None;
-    }
     let mut text = format!("version:{DATA_VERSION}\n");
     for (key, value) in defaults {
         text.push_str(&format!("{key}:{value}\n"));
+    }
+    for key in UNBOUND_BY_DEFAULT {
+        if !defaults.contains_key(key) {
+            text.push_str(&format!("{key}:{UNPRESSED_KEY}\n"));
+        }
     }
     if let Some(scale) = gui_scale
         && !defaults.contains_key(GUI_SCALE)
