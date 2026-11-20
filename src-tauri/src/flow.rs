@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -141,6 +141,7 @@ pub struct LaunchFlow {
     ticket: Mutex<Option<LaunchTicket>>,
     mismatched: Mutex<Option<MinecraftSession>>,
     prepared: Mutex<Option<Prepared>>,
+    sign_outs: AtomicU64,
     sign_in_url: Arc<Mutex<Option<String>>>,
 }
 
@@ -181,6 +182,7 @@ impl LaunchFlow {
             ticket: Mutex::new(None),
             mismatched: Mutex::new(None),
             prepared: Mutex::new(None),
+            sign_outs: AtomicU64::new(0),
             sign_in_url: Arc::new(Mutex::new(None)),
         }
     }
@@ -269,6 +271,7 @@ impl LaunchFlow {
     }
 
     pub fn sign_out(&self) {
+        self.sign_outs.fetch_add(1, Ordering::SeqCst);
         self.prepared.lock().unwrap().take();
         self.authenticator.sign_out();
     }
@@ -298,9 +301,12 @@ impl LaunchFlow {
     }
 
     async fn advance(&self, step: Step) -> Result<Outcome, AuthError> {
+        let sign_outs = self.sign_outs.load(Ordering::SeqCst);
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
-            Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => prepared,
+            Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {
+                prepared
+            }
             kept => {
                 if step == Step::Play && kept.is_some() {
                     log::info!("The prepared launch is over an hour old; preparing again");
@@ -308,8 +314,13 @@ impl LaunchFlow {
                 self.prepare(step).await?
             }
         };
+        let server = prepared.installation.server.clone();
+        // 받는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 시작 버튼이 다시 로그인부터 한다
+        if self.sign_outs.load(Ordering::SeqCst) != sign_outs {
+            log::info!("Signed out while preparing; the next start signs in again");
+            return Ok(Outcome::Ready(server));
+        }
         if !step.starts_the_game() {
-            let server = prepared.installation.server.clone();
             *self.prepared.lock().unwrap() = Some(prepared);
             return Ok(Outcome::Ready(server));
         }

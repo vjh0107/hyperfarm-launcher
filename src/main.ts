@@ -268,6 +268,8 @@ async function start(): Promise<void> {
 
 document.addEventListener("contextmenu", (event) => event.preventDefault());
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.repeat && current === progress?.root) progress.pressPlay();
+  if (event.key !== "Enter" || event.repeat || current !== progress?.root) return;
+  if (event.target instanceof HTMLButtonElement && !event.target.classList.contains("play")) return;
+  progress.pressPlay();
 });
 void start();
