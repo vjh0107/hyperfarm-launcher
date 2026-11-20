@@ -25,6 +25,7 @@ export type LaunchEvent =
   | { state: "preparing"; minecraftVersion: string; mods: number; shaderpacks: number }
   | { state: "downloading"; totalBytes: number; update: boolean; changedMods: number }
   | { state: "progress"; doneBytes: number; totalBytes: number; file: string }
+  | { state: "ready"; server: string }
   | { state: "launching"; server: string }
   | { state: "launched" }
   | { state: "failed"; error: LauncherError }
@@ -46,4 +47,4 @@ export interface LauncherSettings {
   gameDirectory: string | null;
 }
 
-export type Step = "retry" | "switchAccount" | "continueAnyway";
+export type Step = "retry" | "switchAccount" | "continueAnyway" | "play";

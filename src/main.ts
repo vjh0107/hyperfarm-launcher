@@ -131,7 +131,12 @@ function errorContent(error: LauncherError): ErrorContent {
     case "UNSUPPORTED_PLATFORM":
       return { title: "이 PC에서는 실행할 수 없어요", body: error.message, primary: close };
     case "GAME_EXITED":
-      return { title: "게임이 바로 꺼졌어요", body: error.message, secondary: { label: "로그 열기", run: () => void invoke("open_game_log") }, primary: retry };
+      return {
+        title: "게임이 바로 꺼졌어요",
+        body: error.message,
+        secondary: { label: "로그 열기", run: () => void invoke("open_game_log") },
+        primary: { label: "다시 시작", run: () => run("play") },
+      };
   }
 }
 
@@ -159,7 +164,11 @@ async function openSettings(): Promise<void> {
         footer,
         onMemory: (memoryMegabytes) => void invoke("save_settings", { settings: { ...settings, memoryMegabytes } }),
         onOpenFolder: () => void invoke("open_game_directory"),
-        onSignOut: () => void invoke("sign_out"),
+        onSignOut: () => {
+          session = null;
+          progress.clearAccount();
+          void invoke("sign_out");
+        },
       },
       () => show(beforeSettings ?? progress.root),
     ),
@@ -194,6 +203,11 @@ function onLaunch(event: LaunchEvent): void {
     }
     case "progress":
       ticker.record(event.doneBytes, event.totalBytes, event.file);
+      break;
+    case "ready":
+      ticker.stop();
+      progress.ready(summary(pack));
+      if (!current?.classList.contains("settings")) show(progress.root);
       break;
     case "launching":
       ticker.stop();
@@ -238,7 +252,12 @@ function onUpdate(event: UpdateEvent): void {
 
 async function start(): Promise<void> {
   info = await invoke<AppInfo>("app_info");
-  progress = new ProgressScreen(chrome, info.webBase, () => void openSettings());
+  progress = new ProgressScreen(
+    chrome,
+    info.webBase,
+    () => void openSettings(),
+    () => void invoke("run_step", { step: "play" satisfies Step }),
+  );
   progress.setVersion(info.version);
   progress.checking("");
   show(progress.root);
@@ -248,4 +267,7 @@ async function start(): Promise<void> {
 }
 
 document.addEventListener("contextmenu", (event) => event.preventDefault());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.repeat && current === progress?.root) progress.pressPlay();
+});
 void start();

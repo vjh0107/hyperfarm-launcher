@@ -1,7 +1,11 @@
 # 하이퍼팜 launcher
 
 [하이퍼팜](https://hyperf.kr) 웹사이트의 "게임 시작" 버튼(`hyperfarm://launch?ticket=...`)으로 켜져서 Microsoft
-로그인, 마인크래프트·Fabric·모드 설치를 마치고 `hyperf.kr` 에 바로 접속시키는 프로그램이다. Tauri 2 로 만들었다.
+로그인, 마인크래프트·Fabric·모드 설치를 마치고 `hyperf.kr` 에 접속시키는 프로그램이다. Tauri 2 로 만들었다.
+
+- 설치까지 마치면 "게임 시작" 버튼에서 기다린다. 그 사이 톱니바퀴로 메모리를 바꾸면 시작할 때 그대로 쓴다. 준비한 지
+  한 시간이 지나 누르면 로그인과 설치 확인부터 다시 한다. 계정이 웹과 달라 "이 계정으로 시작"을 고르거나, 꺼진 게임을
+  "다시 시작"하면 버튼에서 기다리지 않는다.
 
 - 토큰은 플레이어 PC 의 OS 자격 증명 저장소(macOS Keychain, Windows Credential Manager)에만 둔다.
 - 웹이 넘기는 것은 일회용 launch ticket 뿐이다. launcher 는 그것을 웹 백엔드에서 `{playerId, loginHint}` 로

@@ -23,6 +23,7 @@ export const Icons = {
   back: "M15 18l-6-6l6-6",
   external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
   check: "M20 6L9 17l-5-5",
+  play: "M7 4.5v15l12.5-7.5z",
   spinner: "M21 12a9 9 0 1 1-6.2-8.56",
   alert: "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0M12 7v6M12 17h.01",
 } as const;
