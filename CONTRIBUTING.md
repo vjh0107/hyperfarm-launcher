@@ -51,6 +51,26 @@ scripts/set-version.sh 0.2.0
 설치된 런처는 다음에 켜질 때 그 판으로 바뀝니다. 게시 job 은 `release` 환경에서만 돌고, 그 환경의 secrets 는
 태그와 main 에서만 읽힙니다.
 
+## 모드 구성
+
+`pack/manifest.json` 이 main 에 들어오면 `pack.yml` 이 `pack/verify.py` 로 모든 모드와 쉐이더팩을 실제로 받아 크기와
+sha512 를 대조하고, 하나라도 어긋나면 게시하지 않습니다. 구성을 바꾸는 법은 [README](README.md) 의 `## 모드 구성` 에
+있습니다.
+
+`pack.hyperf.kr` 에 올리는 jar 는 판이 든 새 이름으로만 올리고, 같은 이름을 덮어쓰지 않으며, 한 번 올린 내용이
+바뀌지 않는다는 뜻으로 `Cache-Control: public, max-age=31536000, immutable` 을 붙입니다.
+
+```bash
+aws s3 cp hyperfarm-0.1.1.jar s3://<버킷>/mods/hyperfarm-0.1.1.jar --endpoint-url <R2 엔드포인트> \
+    --cache-control "public, max-age=31536000, immutable"
+```
+
+원본에 `Cache-Control` 이 없으면 Cloudflare 엣지는 쿼리 없는 주소를 4시간(`max-age=14400`) 담아 둡니다. 2026-11-20 에
+게임서버가 서버 리소스팩을 한 경로에 덮어쓰자 엣지는 GET 에 옛 판을, HEAD 에는 원본의 새 크기를 내주어 런처가 크기
+불일치로 실행을 멈췄습니다. 새 이름은 엣지에 없는 주소라 처음부터 원본을 받습니다. `pack/verify.py` 는 우리 호스트의
+파일을 `?v=<sha512 앞 16자>` 를 붙여 받아 엣지의 옛 판을 피하지만, 덮어쓰면 쿼리 없이 받는 옛 런처에는 엣지의 옛 판이
+그대로 갑니다.
+
 ## 되돌리기
 
 Actions 의 **Rollback** 을 손으로 돌립니다.
