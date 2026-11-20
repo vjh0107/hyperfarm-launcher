@@ -57,10 +57,10 @@ Iris 가 Sodium 최신 beta 를 거부해 게임이 뜨지 않았던 것이 그 
 python3 pack/resolve.py
 ```
 
-하이퍼팜이 직접 만든 모드는 `pack.hyperf.kr` 에 판이 든 이름으로 올리고(`hyperfarm-client-1.2.0.jar`), `sources.json`
-의 목록에 `{"id": "hyperfarm-client", "url": "https://pack.hyperf.kr/launcher/mods/hyperfarm-client-1.2.0.jar"}`
+하이퍼팜이 직접 만든 모드는 hyperfarm-mod 의 태그가 `pack.hyperf.kr/mods/` 에 판이 든 이름으로 올리고
+(`hyperfarm-0.1.0.jar`), `sources.json` 의 목록에 `{"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.0.jar"}`
 처럼 적는다. `resolve.py` 가 내려받아 해시와 크기를 박는다. launcher 는 파일 이름으로 바뀐 것을 가리므로 같은
-이름을 덮어쓰지 않는다.
+이름을 덮어쓰지 않는다. 게시 job 도 이미 있는 판을 다시 올리지 않는다.
 
 `serverResourcePack` 은 운영 게임서버가 접속 때 보내는 리소스팩의 공개 주소다. launcher 는 실행할 때마다 그 주소의
 ETag 를 보고 바뀌었으면 받아, 클라이언트가 서버 팩을 찾는 `downloads/<팩 UUID>/<SHA-1>` 에 둔다. 팩 UUID 는
