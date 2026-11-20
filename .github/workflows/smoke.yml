@@ -68,7 +68,11 @@ jobs:
           installed=$(plutil -extract CFBundleShortVersionString raw "$plist")
           [ "$installed" = "$version" ] || { echo "::error::dmg has $installed but latest.json says $version"; exit 1; }
           plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$plist" | grep -qx hyperfarm
-          plutil -extract NSMicrophoneUsageDescription raw "$plist" >/dev/null
+          # 0.1.4 까지는 마이크 문구가 없다. 그 판으로 되돌린 뒤의 smoke 가 늘 실패하지 않게 그 뒤의 판에서만 본다
+          if [ "$(printf '%s\n' 0.1.4 "$version" | sort -V | tail -1)" != 0.1.4 ]; then
+            plutil -extract NSMicrophoneUsageDescription raw "$plist" >/dev/null ||
+              { echo "::error::dmg has no NSMicrophoneUsageDescription"; exit 1; }
+          fi
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q x86_64
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q arm64
           test -L mnt/Applications
