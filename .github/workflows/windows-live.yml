@@ -1,0 +1,31 @@
+name: Windows live install
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install the published pack and open the game
+        working-directory: src-tauri
+        env:
+          HYPERFARM_TEST_LIVE_HOME: ${{ runner.temp }}\hyperfarm-live
+        run: cargo test --locked installs_and_opens -- --ignored --nocapture
+      - name: List what was installed
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:RUNNER_TEMP\hyperfarm-live\mods" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Get-ChildItem "$env:RUNNER_TEMP\hyperfarm-live" -Recurse -Filter *.part -ErrorAction SilentlyContinue | Format-Table FullName, Length
+          Get-Content "$env:RUNNER_TEMP\hyperfarm-live\logs\launcher-game.log" -Tail 80 -ErrorAction SilentlyContinue
