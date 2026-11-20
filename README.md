@@ -62,6 +62,12 @@ python3 pack/resolve.py
 처럼 적는다. `resolve.py` 가 내려받아 해시와 크기를 박는다. launcher 는 파일 이름으로 바뀐 것을 가리므로 같은
 이름을 덮어쓰지 않는다. 게시 job 도 이미 있는 판을 다시 올리지 않는다.
 
+Iris 는 공식 판 대신 쉐이더를 켰을 때 TTF 글자가 깨지는 것을 고친 판을 싣는다. 업스트림 26.3 브랜치(671a5c8)에
+아직 머지되지 않은 [IrisShaders/Iris#3442](https://github.com/IrisShaders/Iris/pull/3442) 를 그대로 얹은 것이고, 원본은
+[Myeong2Namul00/Iris `hyperfarm-ttf-fix`](https://github.com/Myeong2Namul00/Iris/tree/hyperfarm-ttf-fix) 다. LGPL-3.0 에 따라
+소스는 jar 옆 `pack.hyperf.kr/launcher/mods/src/` 에도 둔다. 업스트림이 그 PR 을 담아 내면 `{"slug": "iris"}` 로 돌아가고
+Sodium 의 판 고정을 걷는다 — 지금은 Modrinth 의 Iris 가 Sodium 판을 끌어오지 않으므로 직접 고정했다.
+
 `serverResourcePack` 은 운영 게임서버가 접속 때 보내는 리소스팩의 공개 주소다. launcher 는 실행할 때마다 그 주소의
 ETag 를 보고 바뀌었으면 받아, 클라이언트가 서버 팩을 찾는 `downloads/<팩 UUID>/<SHA-1>` 에 둔다. 팩 UUID 는
 CraftEngine 이 정하는 대로 SHA-1 16진 문자열의 `UUID.nameUUIDFromBytes` 다. 그러면 접속할 때 클라이언트가
