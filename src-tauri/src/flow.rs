@@ -28,6 +28,7 @@ const WINDOW_TIMEOUT: Duration = Duration::from_secs(120);
 // 준비해 둔 로그인과 설치를 이만큼 지나서 시작하면 처음부터 다시 맞춘다. 창을 오래 띄워 두는 사이 Minecraft 토큰(24시간)이
 // 끝나거나 새 모드 구성이 게시되면, 그 준비로 켠 게임은 접속하지 못하거나 옛 모드로 들어간다
 const PREPARED_FOR: Duration = Duration::from_secs(60 * 60);
+const SIGNED_OUT: &str = "로그아웃했어요. 다시 시도하면 로그인부터 해요.";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const GAME_LOG: &str = "launcher-game.log";
 const SESSION_PROFILE: &str = "https://sessionserver.mojang.com/session/minecraft/profile/";
@@ -273,6 +274,7 @@ impl LaunchFlow {
     pub fn sign_out(&self) {
         self.sign_outs.fetch_add(1, Ordering::SeqCst);
         self.prepared.lock().unwrap().take();
+        self.mismatched.lock().unwrap().take();
         self.authenticator.sign_out();
     }
 
@@ -305,23 +307,30 @@ impl LaunchFlow {
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
             Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {
-                prepared
+                Ok(prepared)
             }
             kept => {
                 if step == Step::Play && kept.is_some() {
                     log::info!("The prepared launch is over an hour old; preparing again");
                 }
-                self.prepare(step, sign_outs).await?
+                self.prepare(step, sign_outs).await
             }
         };
-        let server = prepared.installation.server.clone();
-        // 준비하는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 로그아웃 뒤에 끝난 인증이 계정을 저장소에
-        // 다시 써 넣었을 수 있어 한 번 더 지운다. 그래야 시작 버튼이 로그인부터 다시 한다
+        // 준비하는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 준비가 성공했든 실패했든 로그아웃 뒤에 끝난
+        // 인증이 계정을 저장소에 다시 써 넣었을 수 있어 한 번 더 지운다. 그래야 다음 시작이 로그인부터 다시 한다
         if self.signed_out_since(sign_outs) {
             self.authenticator.sign_out();
             log::info!("Signed out while preparing; the next start signs in again");
-            return Ok(Outcome::Ready(server));
+            return match prepared {
+                Ok(prepared) => Ok(Outcome::Ready(prepared.installation.server)),
+                Err(AuthError::Mismatch { .. }) => {
+                    Err(LauncherError::new(Problem::LoginCancelled, SIGNED_OUT).into())
+                }
+                Err(error) => Err(error),
+            };
         }
+        let prepared = prepared?;
+        let server = prepared.installation.server.clone();
         if !step.starts_the_game() {
             *self.prepared.lock().unwrap() = Some(prepared);
             return Ok(Outcome::Ready(server));
