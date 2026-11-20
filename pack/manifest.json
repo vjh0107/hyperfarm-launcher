@@ -84,7 +84,8 @@
     }
   ],
   "defaultOptions": {
-    "lang": "ko_kr"
+    "lang": "ko_kr",
+    "onboardAccessibility": "false"
   },
   "serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip"
 }
