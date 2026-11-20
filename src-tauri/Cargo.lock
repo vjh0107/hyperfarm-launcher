@@ -1998,11 +1998,12 @@ dependencies = [
 
 [[package]]
 name = "hyperfarm-launcher"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64 0.23.1",
  "dirs",
  "discord-rich-presence",
+ "dunce",
  "futures-util",
  "hex",
  "keyring",

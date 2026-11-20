@@ -149,3 +149,63 @@ async fn keeps_going_when_an_optional_file_cannot_be_fetched() {
 
     assert_eq!(std::fs::read(wanted).unwrap(), BODY);
 }
+
+#[test]
+fn skips_optional_files_that_do_not_fit_instead_of_refusing_to_install() {
+    let required = DownloadTask::new("https://a", PathBuf::from("a"), Some(100), None);
+    let pack = DownloadTask::new("https://b", PathBuf::from("b"), Some(500), None).optional();
+    let tasks = [required, pack];
+    let urls = |usable| -> Vec<String> {
+        fitting(&tasks, usable)
+            .unwrap()
+            .into_iter()
+            .map(|task| task.url.clone())
+            .collect()
+    };
+
+    assert_eq!(urls(100 + FREE_SPACE_MARGIN + 499), ["https://a"]);
+    assert_eq!(
+        urls(100 + FREE_SPACE_MARGIN + 500),
+        ["https://a", "https://b"]
+    );
+    let error = fitting(&tasks, 99 + FREE_SPACE_MARGIN).unwrap_err();
+    assert_eq!(error.problem, Problem::DiskFull);
+}
+
+#[cfg(windows)]
+#[test]
+fn finds_the_drive_of_a_canonical_windows_path() {
+    let disks = [(Path::new(r"C:\"), 7), (Path::new(r"D:\"), 9)];
+
+    let space = available_on(
+        Path::new(r"\\?\C:\Users\player\AppData\Roaming\HyperFarm"),
+        disks.into_iter(),
+    );
+
+    assert_eq!(space, 7);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn waits_for_a_target_that_is_locked_for_a_moment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let from = root.path().join("a.jar.part");
+    std::fs::write(&from, BODY).unwrap();
+    let locked = root.path().join("mods");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let unlock = {
+        let locked = locked.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        })
+    };
+
+    move_into_place(&from, &locked.join("a.jar")).await.unwrap();
+    unlock.await.unwrap();
+
+    assert_eq!(std::fs::read(locked.join("a.jar")).unwrap(), BODY);
+}

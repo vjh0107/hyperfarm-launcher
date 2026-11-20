@@ -5,14 +5,19 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
+
+use super::microsoft::INTERACTION_ERRORS;
 
 const PAGE: &str = include_str!("signed_in.html");
 const LOGO: &[u8] = include_bytes!("../../../src/assets/images/logo.webp");
 const HERO: &[u8] = include_bytes!("../../../src/assets/images/bg.webp");
 const CHECK: &str = "M20 6L9 17l-5-5";
 const CROSS: &str = "M6 6l12 12M18 6L6 18";
+const NEXT: &str = "M5 12h14M13 6l6 6-6 6";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn page(query: &HashMap<String, String>) -> String {
+pub(super) fn page(query: &HashMap<String, String>) -> String {
     let (title, message, icon, accent, soft) = match query.get("error").map(String::as_str) {
         None => (
             "로그인을 마쳤어요",
@@ -20,6 +25,14 @@ fn page(query: &HashMap<String, String>) -> String {
             CHECK,
             "#2a9a68",
             "#e7f7ef",
+        ),
+        // prompt=none 이 로그인 창으로 넘어가는 길이다. 실패로 보이면 다음 창에서 로그인하지 않고 런처로 돌아간다
+        Some(error) if INTERACTION_ERRORS.contains(&error) => (
+            "로그인이 필요해요",
+            "다음 창에서 로그인해 주세요.",
+            NEXT,
+            "#6b7684",
+            "#f0f3f7",
         ),
         Some("access_denied") => (
             "로그인을 취소했어요",
@@ -71,13 +84,21 @@ impl LoopbackReceiver {
             .ok()
     }
 
+    // 브라우저는 미리 열어 둔 빈 연결을 붙든 채 진짜 redirect 를 다른 연결로 보낸다. 하나씩 받으면 그 빈 연결이 막는다
     async fn accept_redirect(&self) -> HashMap<String, String> {
+        let mut answering = JoinSet::new();
         loop {
-            let Ok((stream, _)) = self.listener.accept().await else {
-                continue;
-            };
-            if let Some(query) = answer(stream).await {
-                return query;
+            tokio::select! {
+                accepted = self.listener.accept() => {
+                    if let Ok((stream, _)) = accepted {
+                        answering.spawn(tokio::time::timeout(REQUEST_TIMEOUT, answer(stream)));
+                    }
+                }
+                Some(answered) = answering.join_next() => {
+                    if let Ok(Ok(Some(query))) = answered {
+                        return query;
+                    }
+                }
             }
         }
     }

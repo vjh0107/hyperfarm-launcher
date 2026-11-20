@@ -31,7 +31,10 @@ impl Platform {
         Self {
             os_name,
             arch,
-            os_version: sysinfo::System::os_version().unwrap_or_default(),
+            os_version: reported_os_version(
+                os_name,
+                sysinfo::System::os_version().unwrap_or_default(),
+            ),
         }
     }
 
@@ -62,6 +65,19 @@ impl Platform {
         } else {
             ":"
         }
+    }
+}
+
+// sysinfo 는 Windows 를 "10 (19045)" 로 적어, 그대로 견주면 Mojang 의 versionRange(10.0.17134)보다 작게 읽힌다.
+// Mojang 은 Java 의 os.version 처럼 Windows 11 도 10.0.<빌드> 로 본다
+fn reported_os_version(os_name: &str, raw: String) -> String {
+    if os_name != Platform::WINDOWS {
+        return raw;
+    }
+    let windows = Regex::new(r"^1[01] \((\d+)\)$").expect("the Windows version pattern is valid");
+    match windows.captures(&raw) {
+        Some(captures) => format!("10.0.{}", &captures[1]),
+        None => raw,
     }
 }
 
@@ -323,26 +339,18 @@ mod tests {
         let modern = [range(Some("10.0.17134"), None)];
         let legacy = [range(None, Some("10.0.17134"))];
         let none = HashSet::new();
-        assert!(allows(
-            &modern,
-            &platform(Platform::WINDOWS, "x86_64", "10.0.19045"),
-            &none
-        ));
-        assert!(!allows(
-            &modern,
-            &platform(Platform::WINDOWS, "x86_64", "10.0.16299"),
-            &none
-        ));
-        assert!(allows(
-            &legacy,
-            &platform(Platform::WINDOWS, "x86_64", "10.0.16299"),
-            &none
-        ));
-        assert!(!allows(
-            &legacy,
-            &platform(Platform::WINDOWS, "x86_64", "10.0.17134"),
-            &none
-        ));
+        let windows = |sysinfo: &str| {
+            platform(
+                Platform::WINDOWS,
+                "x86_64",
+                &reported_os_version(Platform::WINDOWS, sysinfo.into()),
+            )
+        };
+        assert!(allows(&modern, &windows("10 (19045)"), &none));
+        assert!(allows(&modern, &windows("11 (22631)"), &none));
+        assert!(!allows(&modern, &windows("10 (16299)"), &none));
+        assert!(allows(&legacy, &windows("10 (16299)"), &none));
+        assert!(!allows(&legacy, &windows("10 (17134)"), &none));
     }
 
     #[test]

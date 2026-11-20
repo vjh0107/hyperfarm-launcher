@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use tokio::io::AsyncReadExt;
 
-use super::download::{DownloadTask, io_error};
+use super::download::{DownloadTask, io_error, move_into_place};
+use super::with_query;
 use crate::error::LauncherError;
 
 const STAGING: &str = "hyperfarm-server-pack.zip";
@@ -61,12 +62,14 @@ impl ServerPack {
         };
         // HEAD 응답은 본문이 없어 content_length() 가 0 을 줄 때가 있다
         let size = header(reqwest::header::CONTENT_LENGTH).parse::<u64>().ok();
-        let version = format!(
-            "{}|{}|{}",
-            header(reqwest::header::ETAG),
-            header(reqwest::header::LAST_MODIFIED),
-            size.unwrap_or_default()
-        );
+        let etag = header(reqwest::header::ETAG);
+        // 게임서버 파드마다 같은 팩을 다시 올려 Last-Modified 는 바뀌어도 ETag 는 그대로다. ETag 가 있으면 그것만 본다
+        let changed_at = if etag.is_empty() {
+            header(reqwest::header::LAST_MODIFIED)
+        } else {
+            String::new()
+        };
+        let version = format!("{etag}|{changed_at}|{}", size.unwrap_or_default());
         if self.current(&version).await {
             return None;
         }
@@ -96,7 +99,7 @@ impl ServerPack {
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
         }
-        tokio::fs::rename(&pending.task.target, &target)
+        move_into_place(&pending.task.target, &target)
             .await
             .map_err(io_error)?;
         let record = Record {
@@ -123,11 +126,6 @@ impl ServerPack {
                 .await
                 .unwrap_or(false)
     }
-}
-
-fn with_query(url: &str, version: &str) -> String {
-    let separator = if url.contains('?') { '&' } else { '?' };
-    format!("{url}{separator}v={version}")
 }
 
 fn cached_path(downloads: &Path, sha1: &str) -> PathBuf {
@@ -274,6 +272,30 @@ mod tests {
             .mount(&first)
             .await;
         assert!(pack.prepare(&client).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn keeps_the_pack_that_was_uploaded_again_with_the_same_content() {
+        let server = MockServer::start().await;
+        let head = |modified: &str| {
+            Mock::given(method("HEAD")).respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("ETag", "\"a\"")
+                    .insert_header("Last-Modified", modified),
+            )
+        };
+        head("Fri, 20 Nov 2026 05:31:59 GMT").mount(&server).await;
+        let game = tempfile::tempdir().unwrap();
+        let client = reqwest::Client::new();
+        let pack = ServerPack::new(&format!("{}/pack.zip", server.uri()), game.path());
+        let pending = pack.prepare(&client).await.unwrap();
+        download(&pending).await;
+        pack.finish(pending).await.unwrap();
+
+        server.reset().await;
+        head("Fri, 20 Nov 2026 06:47:50 GMT").mount(&server).await;
+
+        assert!(pack.prepare(&client).await.is_none());
     }
 
     #[tokio::test]

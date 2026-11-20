@@ -12,23 +12,154 @@ fn pack_file(file_name: &str) -> PackFile {
     }
 }
 
-#[tokio::test]
-async fn prunes_only_jars_missing_from_the_manifest() {
-    let mods = tempfile::tempdir().unwrap();
-    std::fs::write(mods.path().join("sodium.jar"), "kept").unwrap();
-    std::fs::write(mods.path().join("old-sodium.jar"), "stale").unwrap();
-    std::fs::write(mods.path().join("sodium.toml"), "config").unwrap();
+fn names_in(directory: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != INSTALLED_MODS)
+        .collect();
+    names.sort();
+    names
+}
 
-    prune_mods(&[pack_file("sodium.jar")], mods.path())
+#[tokio::test]
+async fn prunes_only_jars_it_installed_that_left_the_manifest() {
+    let mods = tempfile::tempdir().unwrap();
+    std::fs::write(mods.path().join("sodium-old.jar"), "ours").unwrap();
+    std::fs::write(mods.path().join("lithium.jar"), "ours").unwrap();
+    std::fs::write(mods.path().join("players-own.jar"), "theirs").unwrap();
+    prune_mods(
+        &[pack_file("sodium-old.jar"), pack_file("lithium.jar")],
+        mods.path(),
+        false,
+    )
+    .await
+    .unwrap();
+    std::fs::write(mods.path().join("sodium-new.jar"), "ours").unwrap();
+
+    prune_mods(
+        &[pack_file("sodium-new.jar"), pack_file("lithium.jar")],
+        mods.path(),
+        false,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        names_in(mods.path()),
+        ["lithium.jar", "players-own.jar", "sodium-new.jar"]
+    );
+}
+
+#[tokio::test]
+async fn keeps_every_jar_in_a_folder_it_has_not_installed_into() {
+    let mods = tempfile::tempdir().unwrap();
+    std::fs::write(mods.path().join("sodium.jar"), "ours").unwrap();
+    std::fs::write(mods.path().join("players-own.jar"), "theirs").unwrap();
+
+    prune_mods(&[pack_file("sodium.jar")], mods.path(), false)
         .await
         .unwrap();
 
-    let mut left: Vec<String> = std::fs::read_dir(mods.path())
+    assert_eq!(names_in(mods.path()), ["players-own.jar", "sodium.jar"]);
+}
+
+#[tokio::test]
+async fn clears_old_jars_from_its_own_folder_before_it_kept_a_record() {
+    let mods = tempfile::tempdir().unwrap();
+    std::fs::write(mods.path().join("sodium-0.9.2.jar"), "older launcher").unwrap();
+    std::fs::write(mods.path().join("sodium-0.9.3.jar"), "ours").unwrap();
+    std::fs::write(mods.path().join("sodium.toml"), "config").unwrap();
+
+    prune_mods(&[pack_file("sodium-0.9.3.jar")], mods.path(), true)
+        .await
+        .unwrap();
+
+    let mut left = names_in(mods.path());
+    left.retain(|name| !name.starts_with('.'));
+    assert_eq!(left, ["sodium-0.9.3.jar", "sodium.toml"]);
+}
+
+#[test]
+fn fetches_our_jars_past_the_edge_cache_and_modrinth_as_published() {
+    let sha512 = format!("{}{}", "AB".repeat(8), "cd".repeat(56));
+    let file = |url: &str| PackFile {
+        file_name: "a.jar".into(),
+        url: url.into(),
+        sha512: sha512.clone(),
+        size: 4,
+    };
+    let modrinth = "https://cdn.modrinth.com/data/x/versions/y/sodium.jar";
+
+    let tasks = pack_tasks(
+        &[
+            file("https://pack.hyperf.kr/mods/hyperfarm-0.1.0.jar"),
+            file(modrinth),
+        ],
+        Path::new("/mods"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        tasks[0].url,
+        "https://pack.hyperf.kr/mods/hyperfarm-0.1.0.jar?v=abababababababab"
+    );
+    assert_eq!(tasks[1].url, modrinth);
+}
+
+#[test]
+fn reads_the_server_pack_only_under_the_key_old_launchers_ignore() {
+    let manifest = |extra: &str| -> PackManifest {
+        serde_json::from_str(&format!(
+            r#"{{"minecraftVersion": "26.3", "fabricLoaderVersion": "0.20.1", "server": "hyperf.kr",
+                "mods": [], "shaderpacks": [], {extra}}}"#
+        ))
         .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    left.sort();
-    assert_eq!(left, ["sodium.jar", "sodium.toml"]);
+    };
+
+    assert_eq!(
+        manifest(r#""serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip""#)
+            .server_resource_pack_url
+            .as_deref(),
+        Some("https://pack-prod.hyperf.kr/resource_pack.zip")
+    );
+    assert!(
+        manifest(r#""serverResourcePack": "https://pack-prod.hyperf.kr/resource_pack.zip""#)
+            .server_resource_pack_url
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn starts_from_the_saved_fabric_profile_while_the_meta_server_is_down() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"id": "fabric-loader-0.20.1-26.3", "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient", "libraries": []}"#,
+        ))
+        .mount(&server)
+        .await;
+    let root = tempfile::tempdir().unwrap();
+    let saved = root.path().join("fabric-loader-0.20.1-26.3.json");
+    let url = format!("{}/profile/json", server.uri());
+    let http = Http::new();
+    fabric_profile(&http, &url, &saved).await.unwrap();
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    let profile = fabric_profile(&http, &url, &saved).await.unwrap();
+    assert_eq!(profile.id, "fabric-loader-0.20.1-26.3");
+    let unsaved = fabric_profile(&http, &url, &root.path().join("other.json"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(unsaved.problem, Problem::Network);
 }
 
 #[tokio::test]

@@ -9,8 +9,7 @@ mod settings;
 mod ticket;
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -28,6 +27,10 @@ const LAUNCH_EVENT: &str = "launch";
 const UPDATE_EVENT: &str = "update";
 const XBOX_PROFILE: &str = "https://account.xbox.com/";
 const CLOSE_AFTER_LAUNCH: Duration = Duration::from_millis(1500);
+const GAME_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
+const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+const UPDATE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 type Flow = Arc<LaunchFlow>;
 
@@ -54,11 +57,32 @@ enum UpdateEvent {
 }
 
 #[derive(Default)]
-struct Playing(AtomicBool);
+struct Game(Mutex<Option<Child>>);
+
+impl Game {
+    fn start(&self, child: Child) {
+        *self.0.lock().unwrap() = Some(child);
+    }
+
+    // 플래그가 아니라 프로세스를 본다. 기다리던 쪽이 어떤 길로 멈춰도 꺼진 게임이 다음 실행을 막지 않는다
+    fn is_running(&self) -> bool {
+        let mut game = self.0.lock().unwrap();
+        let Some(child) = game.as_mut() else {
+            return false;
+        };
+        match child.try_wait() {
+            Ok(None) => return true,
+            Ok(Some(status)) => log::info!("The game exited with {status}"),
+            Err(error) => log::warn!("Could not check on the game process: {error}"),
+        }
+        *game = None;
+        false
+    }
+}
 
 #[tauri::command]
 async fn begin(app: AppHandle, flow: State<'_, Flow>) -> Result<(), ()> {
-    if update(&app).await {
+    if update(&app, &flow).await {
         return Ok(());
     }
     stay_while_playing(&app, flow.run(Step::Retry).await);
@@ -73,10 +97,10 @@ async fn run_step(app: AppHandle, step: Step, flow: State<'_, Flow>) -> Result<(
 
 // 창은 닫고 게임이 도는 동안 남아 Discord 에 플레이 중을 띄운다. 게임이 꺼지면 함께 꺼진다
 fn stay_while_playing(app: &AppHandle, game: Option<Child>) {
-    let Some(mut game) = game else {
+    let Some(game) = game else {
         return;
     };
-    app.state::<Playing>().0.store(true, Ordering::SeqCst);
+    app.state::<Game>().start(game);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(CLOSE_AFTER_LAUNCH).await;
@@ -86,9 +110,19 @@ fn stay_while_playing(app: &AppHandle, game: Option<Child>) {
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
         let homepage = app.state::<Flow>().web_base().to_string();
-        presence::show_until_exit(&mut game, homepage).await;
+        let presence = tauri::async_runtime::spawn(presence::show(homepage));
+        let mut check = tokio::time::interval(GAME_CHECK_INTERVAL);
+        while app.state::<Game>().is_running() {
+            check.tick().await;
+        }
+        presence.abort();
         app.exit(0);
     });
+}
+
+#[tauri::command]
+fn cancel_sign_in(flow: State<'_, Flow>) {
+    flow.cancel_sign_in();
 }
 
 #[tauri::command]
@@ -170,9 +204,12 @@ async fn choose_game_directory(
     else {
         return Ok(None);
     };
-    let directory = picked
-        .into_path()
-        .map_err(|_| "이 폴더는 쓸 수 없어요.".to_string())?;
+    let unusable = || "이 폴더는 쓸 수 없어요.".to_string();
+    let directory = flow::game_root(&picked.into_path().map_err(|_| unusable())?);
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        log::warn!("Could not create the game directory: {error}");
+        unusable()
+    })?;
     let mut settings = flow.settings();
     settings.game_directory = Some(directory.clone());
     save_settings(settings, flow)?;
@@ -186,16 +223,22 @@ fn quit(app: AppHandle) {
 
 // 고칠 판이 있으면 내려받아 깔고 다시 띄운다. 확인이 실패해도 지금 판으로 게임은 켠다.
 // latest.json 이 가리키는 판과 다르기만 하면 받으므로, 게시한 판을 옛 판으로 되돌리면 설치된 런처도 따라 내려간다
-async fn update(app: &AppHandle) -> bool {
+async fn update(app: &AppHandle, flow: &LaunchFlow) -> bool {
+    let Some(_held) = flow.hold() else {
+        log::info!("Skipping the launcher update check while the launcher is busy");
+        return false;
+    };
     let checked = match app
         .updater_builder()
         .version_comparator(|current, remote| remote.version != current)
+        .timeout(UPDATE_CHECK_TIMEOUT)
+        .configure_client(|client| client.read_timeout(UPDATE_STALL_TIMEOUT))
         .build()
     {
         Ok(updater) => updater.check().await,
         Err(error) => Err(error),
     };
-    let update = match checked {
+    let mut update = match checked {
         Ok(Some(update)) => update,
         Ok(None) => return false,
         Err(error) => {
@@ -203,6 +246,8 @@ async fn update(app: &AppHandle) -> bool {
             return false;
         }
     };
+    // 확인의 timeout 이 받기에도 그대로 이어져, 느린 연결에서는 다 받기 전에 끊긴다
+    update.timeout = Some(UPDATE_DOWNLOAD_TIMEOUT);
     let version = update.version.clone();
     let notes = update.body.as_deref().and_then(release_summary);
     let mut done_bytes = 0u64;
@@ -220,7 +265,9 @@ async fn update(app: &AppHandle) -> bool {
                     },
                 );
             },
+            // Windows 는 설치 프로그램을 띄우는 자리에서 곧바로 꺼지므로 restart 앞이 아니라 여기서 남긴다
             || {
+                flow.keep_ticket_for_restart();
                 let _ = app.emit(UPDATE_EVENT, UpdateEvent::Installing);
             },
         )
@@ -229,6 +276,7 @@ async fn update(app: &AppHandle) -> bool {
         Ok(()) => app.restart(),
         Err(error) => {
             log::warn!("Could not install launcher {version}: {error}");
+            flow.forget_kept_ticket();
             false
         }
     }
@@ -289,11 +337,9 @@ pub fn run() {
             let emit = Arc::new(move |event: LaunchEvent| {
                 let _ = emitter.emit(LAUNCH_EVENT, event);
             });
-            app.manage::<Flow>(Arc::new(LaunchFlow::new(
-                LauncherConfig::load(),
-                browser,
-                emit,
-            )));
+            let flow = Arc::new(LaunchFlow::new(LauncherConfig::load(), browser, emit));
+            flow.restore_kept_ticket();
+            app.manage::<Flow>(flow);
 
             #[cfg(any(windows, target_os = "linux"))]
             if let Err(error) = app.deep_link().register_all() {
@@ -305,7 +351,7 @@ pub fn run() {
             let linked = handle.clone();
             app.deep_link().on_open_url(move |event| {
                 // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다
-                if linked.state::<Playing>().0.load(Ordering::SeqCst) {
+                if linked.state::<Game>().is_running() {
                     log::info!("Ignoring a launch link while the game is running");
                     return;
                 }
@@ -315,8 +361,8 @@ pub fn run() {
                 let app = linked.clone();
                 let flow = linked.state::<Flow>().inner().clone();
                 tauri::async_runtime::spawn(async move {
-                    // 창을 띄워 둔 채 새 판이 나왔을 수 있다. 실행 중이면 그 실행을 끊지 않는다
-                    if !flow.is_busy() && update(&app).await {
+                    // 창을 띄워 둔 채 새 판이 나왔을 수 있다. 실행이나 다른 확인이 돌고 있으면 update 가 건너뛴다
+                    if update(&app, &flow).await {
                         return;
                     }
                     stay_while_playing(&app, flow.run(Step::Retry).await);
@@ -324,10 +370,11 @@ pub fn run() {
             });
             Ok(())
         })
-        .manage(Playing::default())
+        .manage(Game::default())
         .invoke_handler(tauri::generate_handler![
             begin,
             run_step,
+            cancel_sign_in,
             reopen_sign_in,
             sign_out,
             app_info,
@@ -345,7 +392,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = event
-                && app.state::<Playing>().0.load(Ordering::SeqCst)
+                && app.state::<Game>().is_running()
             {
                 api.prevent_exit();
             }
@@ -354,7 +401,48 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::release_summary;
+    use std::time::Duration;
+
+    use super::{Game, release_summary};
+
+    fn sleeping_process() -> tokio::process::Child {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("powershell");
+            command.args(["-NoProfile", "-Command", "Start-Sleep 30"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = tokio::process::Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        command.kill_on_drop(true).spawn().unwrap()
+    }
+
+    #[tokio::test]
+    async fn stops_counting_the_game_as_running_once_its_process_is_gone() {
+        let game = Game::default();
+        assert!(!game.is_running());
+        game.start(sleeping_process());
+        assert!(game.is_running());
+
+        game.0
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .start_kill()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while game.is_running() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the killed game still counts as running");
+    }
 
     #[test]
     fn summarizes_the_first_release_note_item() {

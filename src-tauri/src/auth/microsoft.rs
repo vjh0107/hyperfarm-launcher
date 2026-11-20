@@ -11,7 +11,7 @@ use crate::error::{LauncherError, Problem};
 use crate::http::{Http, HttpError};
 
 const SCOPE: &str = "XboxLive.signin offline_access";
-const INTERACTION_ERRORS: [&str; 4] = [
+pub(super) const INTERACTION_ERRORS: [&str; 4] = [
     "interaction_required",
     "login_required",
     "consent_required",

@@ -5,6 +5,7 @@ use super::download::{DownloadTask, Hash};
 use super::metadata::Library;
 use super::rules::{Platform, allows};
 use crate::error::{LauncherError, Problem};
+use crate::http::Http;
 
 pub struct MavenCoordinate {
     group: String,
@@ -79,6 +80,25 @@ pub fn resolve(
         }
     }
     Ok(tasks)
+}
+
+// Fabric 메타는 로더 jar 에 해시를 싣지 않는다. 해시가 없으면 깨진 jar 도 자리에 있기만 하면 그대로 쓰인다
+pub async fn fill_missing_hashes(http: &Http, tasks: &mut [DownloadTask]) {
+    for task in tasks.iter_mut().filter(|task| task.hash.is_none()) {
+        let url = format!("{}.sha1", task.url);
+        match http.get_text(&url).await {
+            Ok(text) => match parse_sha1(&text) {
+                Some(hex) => task.hash = Some(Hash::sha1(hex)),
+                None => log::warn!("{url} does not hold a SHA-1"),
+            },
+            Err(error) => log::warn!("Could not fetch {url}: {error}"),
+        }
+    }
+}
+
+fn parse_sha1(text: &str) -> Option<&str> {
+    let hex = text.split_whitespace().next()?;
+    (hex.len() == 40 && hex.chars().all(|c| c.is_ascii_hexdigit())).then_some(hex)
 }
 
 fn task(
@@ -190,6 +210,47 @@ mod tests {
             tasks[0].target,
             Path::new("/libs/org/ow2/asm/asm/9.10.1/asm-9.10.1.jar")
         );
+    }
+
+    #[tokio::test]
+    async fn verifies_a_library_without_a_hash_against_the_maven_checksum() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let sha1 = "4f".repeat(20);
+        Mock::given(path(
+            "/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar.sha1",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(format!("{sha1}  fabric-loader-0.20.1.jar\n")),
+        )
+        .mount(&server)
+        .await;
+        let library = |name: &str| Library {
+            name: name.into(),
+            downloads: None,
+            rules: vec![],
+            url: Some(server.uri()),
+            sha1: None,
+            size: None,
+        };
+        let mut tasks = resolve(
+            &[
+                library("net.fabricmc:fabric-loader:0.20.1"),
+                library("net.fabricmc:intermediary:26.3"),
+            ],
+            &[],
+            &windows(),
+            Path::new("/libs"),
+        )
+        .unwrap();
+
+        fill_missing_hashes(&Http::new(), &mut tasks).await;
+
+        assert_eq!(tasks[0].hash, Some(Hash::sha1(&sha1)));
+        assert_eq!(tasks[1].hash, None);
     }
 
     #[test]

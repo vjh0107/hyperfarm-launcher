@@ -13,6 +13,7 @@ use crate::error::{LauncherError, Problem};
 const PARALLEL_DOWNLOADS: usize = 16;
 const ATTEMPTS: u32 = 3;
 const FREE_SPACE_MARGIN: u64 = 256 * 1024 * 1024;
+const RENAME_ATTEMPTS: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Hash {
@@ -36,7 +37,7 @@ impl Hash {
         }
     }
 
-    fn expected(&self) -> &str {
+    pub fn expected(&self) -> &str {
         match self {
             Hash::Sha1(hex) | Hash::Sha512(hex) => hex,
         }
@@ -176,14 +177,11 @@ impl Downloader {
         root: &Path,
         progress: Progress,
     ) -> Result<(), LauncherError> {
-        let total: u64 = missing.iter().map(DownloadTask::expected_bytes).sum();
         tokio::fs::create_dir_all(root).await.map_err(io_error)?;
-        let usable = usable_space(root);
-        if usable < total + FREE_SPACE_MARGIN {
-            return Err(LauncherError::disk_full(total + FREE_SPACE_MARGIN, usable));
-        }
+        let tasks = fitting(missing, usable_space(root))?;
+        let total: u64 = tasks.iter().map(|task| task.expected_bytes()).sum();
         let done = AtomicU64::new(0);
-        stream::iter(missing.iter().map(Ok::<_, LauncherError>))
+        stream::iter(tasks.into_iter().map(Ok::<_, LauncherError>))
             .try_for_each_concurrent(PARALLEL_DOWNLOADS, |task| {
                 let done = &done;
                 let progress = &progress;
@@ -236,7 +234,7 @@ async fn fetch(
         .await;
         match result {
             Ok(()) => {
-                tokio::fs::rename(&partial, &task.target)
+                move_into_place(&partial, &task.target)
                     .await
                     .map_err(io_error)?;
                 return Ok(());
@@ -326,16 +324,73 @@ async fn transfer(
     Ok(())
 }
 
+// 받지 못해도 되는 파일은 필수 파일을 받고 남는 공간에 들어갈 때만 받는다
+fn fitting(missing: &[DownloadTask], usable: u64) -> Result<Vec<&DownloadTask>, LauncherError> {
+    let needed: u64 = missing
+        .iter()
+        .filter(|task| !task.optional)
+        .map(DownloadTask::expected_bytes)
+        .sum::<u64>()
+        + FREE_SPACE_MARGIN;
+    if usable < needed {
+        return Err(LauncherError::disk_full(needed, usable));
+    }
+    let mut spare = usable - needed;
+    Ok(missing
+        .iter()
+        .filter(|task| {
+            if !task.optional {
+                return true;
+            }
+            let size = task.expected_bytes();
+            if size > spare {
+                log::warn!("Skipped {}: not enough disk space", task.url);
+                return false;
+            }
+            spare -= size;
+            true
+        })
+        .collect())
+}
+
+// 백신이 막 받은 파일을 검사하는 동안 Windows 는 그 파일의 이름 바꾸기를 PermissionDenied 로 거절한다
+pub(crate) async fn move_into_place(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match tokio::fs::rename(from, to).await {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && attempt < RENAME_ATTEMPTS =>
+            {
+                tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
 fn usable_space(path: &Path) -> u64 {
     let Ok(disks) = sysinfo::Disks::new_with_refreshed_list() else {
         return u64::MAX;
     };
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    available_on(
+        &canonical,
+        disks
+            .iter()
+            .map(|disk| (disk.mount_point(), disk.available_space())),
+    )
+}
+
+// Windows 의 canonicalize 는 \\?\C:\ 를 돌려주고 sysinfo 의 마운트 지점은 C:\ 라, 떼지 않으면 어느 디스크와도 맞지
+// 않아 검사가 꺼진다
+fn available_on<'a>(path: &Path, disks: impl Iterator<Item = (&'a Path, u64)>) -> u64 {
+    let path = dunce::simplified(path);
     disks
-        .iter()
-        .filter(|disk| canonical.starts_with(disk.mount_point()))
-        .max_by_key(|disk| disk.mount_point().as_os_str().len())
-        .map(|disk| disk.available_space())
+        .filter(|(mount, _)| path.starts_with(mount))
+        .max_by_key(|(mount, _)| mount.as_os_str().len())
+        .map(|(_, space)| space)
         .unwrap_or(u64::MAX)
 }
 

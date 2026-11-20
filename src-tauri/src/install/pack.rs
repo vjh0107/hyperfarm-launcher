@@ -15,7 +15,8 @@ pub struct PackManifest {
     pub shaderpacks: Vec<PackFile>,
     #[serde(default)]
     pub default_options: BTreeMap<String, String>,
-    pub server_resource_pack: Option<String>,
+    // 옛 키(serverResourcePack)로 되돌리면 0.1.5 까지의 launcher 가 읽고, 엣지에 옛 팩이 남아 있을 때 실행을 멈춘다
+    pub server_resource_pack_url: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
