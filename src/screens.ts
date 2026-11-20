@@ -67,9 +67,20 @@ export class ProgressScreen {
   private readonly account = h("div", { class: "account" });
   private readonly version = h("span", { class: "caption" });
   private readonly settings: HTMLButtonElement;
+  private readonly play: HTMLButtonElement;
 
-  constructor(chrome: Chrome, private readonly webBase: string, openSettings: () => void) {
+  constructor(chrome: Chrome, private readonly webBase: string, openSettings: () => void, play: () => void) {
     this.settings = iconButton(Icons.settings, "설정", openSettings);
+    this.play = pill(
+      "게임 시작",
+      "primary play",
+      () => {
+        this.play.disabled = true;
+        play();
+      },
+      icon(Icons.play, 15, 2.4),
+    );
+    this.play.hidden = true;
     const progress = h("div", { class: "progress" }, this.bar, h("div", { class: "captions" }, this.left, this.right));
     this.account.hidden = true;
     this.root = frame(
@@ -80,8 +91,13 @@ export class ProgressScreen {
       heading(this.title, this.subtitle),
       progress,
       spacer(),
-      h("footer", { class: "footer" }, this.account, this.version),
+      h("footer", { class: "footer" }, this.account, this.version, this.play),
     );
+  }
+
+  // Enter 로 누를 때도 버튼을 거쳐, 한 번 누른 뒤의 Enter 가 시작을 두 번 보내지 않는다
+  pressPlay(): void {
+    if (!this.play.hidden && !this.play.disabled) this.play.click();
   }
 
   setVersion(version: string): void {
@@ -93,9 +109,15 @@ export class ProgressScreen {
     this.account.hidden = false;
   }
 
+  clearAccount(): void {
+    this.account.replaceChildren();
+    this.account.hidden = true;
+  }
+
   checking(subtitle: string, title = "업데이트 확인 중"): void {
     this.text(title, subtitle);
     this.settings.hidden = false;
+    this.showPlay(false);
     this.mode("indeterminate");
     this.captions("", "");
   }
@@ -103,8 +125,17 @@ export class ProgressScreen {
   downloading(title: string, subtitle: string, allowSettings: boolean): void {
     this.text(title, subtitle);
     this.settings.hidden = !allowSettings;
+    this.showPlay(false);
     this.mode("determinate");
     this.fraction(0);
+  }
+
+  ready(subtitle: string): void {
+    this.text("게임을 시작할 수 있어요", subtitle);
+    this.settings.hidden = false;
+    this.mode("done");
+    this.readyCaption();
+    this.showPlay(true);
   }
 
   progress(fraction: number, left: string, right: string): void {
@@ -115,9 +146,20 @@ export class ProgressScreen {
   launching(server: string): void {
     this.text("게임 시작 중", server);
     this.settings.hidden = true;
+    this.showPlay(false);
     this.mode("done");
+    this.readyCaption();
+  }
+
+  private readyCaption(): void {
     this.left.replaceChildren(h("span", { class: "ready" }, icon(Icons.check, 14, 3), "준비 완료"));
     this.right.textContent = "";
+  }
+
+  private showPlay(visible: boolean): void {
+    this.play.hidden = !visible;
+    this.play.disabled = false;
+    this.version.hidden = visible;
   }
 
   private text(title: string, subtitle: string): void {

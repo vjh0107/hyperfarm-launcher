@@ -435,6 +435,14 @@ button:focus-visible {
   transform: scale(0.96);
 }
 
+.pill[hidden] {
+  display: none;
+}
+
+.pill.play {
+  animation: enter 0.3s var(--ease) both;
+}
+
 .pill.primary {
   padding: 0 22px;
   font-family: "Paperlogy", "Pretendard", sans-serif;

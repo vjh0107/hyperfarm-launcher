@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -16,12 +17,18 @@ use crate::http::Http;
 use crate::install::download::Progress;
 use crate::install::options::{self, WorkArea};
 use crate::install::rules::Platform;
-use crate::install::{DownloadPlan, GameInstaller, GameLayout, InstallListener, pack};
+use crate::install::{
+    DownloadPlan, GameInstaller, GameLayout, InstallListener, Installation, pack,
+};
 use crate::launch::{self, LaunchOptions};
 use crate::settings::{CLIENT_ID, LauncherConfig, LauncherSettings, SettingsStore};
 use crate::ticket::{self, LaunchTicket};
 
 const WINDOW_TIMEOUT: Duration = Duration::from_secs(120);
+// 준비해 둔 로그인과 설치를 이만큼 지나서 시작하면 처음부터 다시 맞춘다. 창을 오래 띄워 두는 사이 Minecraft 토큰(24시간)이
+// 끝나거나 새 모드 구성이 게시되면, 그 준비로 켠 게임은 접속하지 못하거나 옛 모드로 들어간다
+const PREPARED_FOR: Duration = Duration::from_secs(60 * 60);
+const SIGNED_OUT: &str = "로그아웃했어요. 다시 시도하면 로그인부터 해요.";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const GAME_LOG: &str = "launcher-game.log";
 const SESSION_PROFILE: &str = "https://sessionserver.mojang.com/session/minecraft/profile/";
@@ -52,6 +59,9 @@ pub enum LaunchEvent {
         total_bytes: u64,
         file: String,
     },
+    Ready {
+        server: String,
+    },
     Launching {
         server: String,
     },
@@ -77,6 +87,27 @@ pub enum Step {
     Retry,
     SwitchAccount,
     ContinueAnyway,
+    Play,
+}
+
+impl Step {
+    // 플레이어가 이미 시작을 고른 단계다. 준비가 끝나도 게임 시작 버튼에서 한 번 더 기다리지 않는다
+    fn starts_the_game(self) -> bool {
+        matches!(self, Step::ContinueAnyway | Step::Play)
+    }
+}
+
+struct Prepared {
+    session: MinecraftSession,
+    installation: Installation,
+    layout: GameLayout,
+    default_options: BTreeMap<String, String>,
+    at: Instant,
+}
+
+enum Outcome {
+    Ready(String),
+    Started(Child),
 }
 
 #[derive(Default)]
@@ -110,6 +141,8 @@ pub struct LaunchFlow {
     pending_code: Mutex<Option<String>>,
     ticket: Mutex<Option<LaunchTicket>>,
     mismatched: Mutex<Option<MinecraftSession>>,
+    prepared: Mutex<Option<Prepared>>,
+    sign_outs: AtomicU64,
     sign_in_url: Arc<Mutex<Option<String>>>,
 }
 
@@ -149,6 +182,8 @@ impl LaunchFlow {
             pending_code: Mutex::new(None),
             ticket: Mutex::new(None),
             mismatched: Mutex::new(None),
+            prepared: Mutex::new(None),
+            sign_outs: AtomicU64::new(0),
             sign_in_url: Arc::new(Mutex::new(None)),
         }
     }
@@ -195,8 +230,9 @@ impl LaunchFlow {
             return None;
         };
         let mut game = None;
-        let event = match self.launch(step).await {
-            Ok(child) => {
+        let event = match self.advance(step).await {
+            Ok(Outcome::Ready(server)) => LaunchEvent::Ready { server },
+            Ok(Outcome::Started(child)) => {
                 game = Some(child);
                 LaunchEvent::Launched
             }
@@ -236,6 +272,9 @@ impl LaunchFlow {
     }
 
     pub fn sign_out(&self) {
+        self.sign_outs.fetch_add(1, Ordering::SeqCst);
+        self.prepared.lock().unwrap().take();
+        self.mismatched.lock().unwrap().take();
         self.authenticator.sign_out();
     }
 
@@ -263,7 +302,47 @@ impl LaunchFlow {
         self.settings.game_directory(&self.config.home)
     }
 
-    async fn launch(&self, step: Step) -> Result<Child, AuthError> {
+    async fn advance(&self, step: Step) -> Result<Outcome, AuthError> {
+        let sign_outs = self.sign_outs.load(Ordering::SeqCst);
+        let kept = self.prepared.lock().unwrap().take();
+        let prepared = match kept {
+            Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {
+                Ok(prepared)
+            }
+            kept => {
+                if step == Step::Play && kept.is_some() {
+                    log::info!("The prepared launch is over an hour old; preparing again");
+                }
+                self.prepare(step, sign_outs).await
+            }
+        };
+        // 준비하는 동안 설정에서 로그아웃했으면 그 전에 받은 세션으로 켜지 않는다. 준비가 성공했든 실패했든 로그아웃 뒤에 끝난
+        // 인증이 계정을 저장소에 다시 써 넣었을 수 있어 한 번 더 지운다. 그래야 다음 시작이 로그인부터 다시 한다
+        if self.signed_out_since(sign_outs) {
+            self.authenticator.sign_out();
+            log::info!("Signed out while preparing; the next start signs in again");
+            return match prepared {
+                Ok(prepared) => Ok(Outcome::Ready(prepared.installation.server)),
+                Err(AuthError::Mismatch { .. }) => {
+                    Err(LauncherError::new(Problem::LoginCancelled, SIGNED_OUT).into())
+                }
+                Err(error) => Err(error),
+            };
+        }
+        let prepared = prepared?;
+        let server = prepared.installation.server.clone();
+        if !step.starts_the_game() {
+            *self.prepared.lock().unwrap() = Some(prepared);
+            return Ok(Outcome::Ready(server));
+        }
+        self.start(prepared).await.map(Outcome::Started)
+    }
+
+    fn signed_out_since(&self, sign_outs: u64) -> bool {
+        self.sign_outs.load(Ordering::SeqCst) != sign_outs
+    }
+
+    async fn prepare(&self, step: Step, sign_outs: u64) -> Result<Prepared, AuthError> {
         (self.emit)(LaunchEvent::Checking);
         let ticket = self.redeem().await;
         let accepted = if step == Step::ContinueAnyway {
@@ -299,10 +378,12 @@ impl LaunchFlow {
                 }
             }
         };
-        (self.emit)(LaunchEvent::SignedIn {
-            player_id: session.player_id.clone(),
-            name: session.name.clone(),
-        });
+        if !self.signed_out_since(sign_outs) {
+            (self.emit)(LaunchEvent::SignedIn {
+                player_id: session.player_id.clone(),
+                name: session.name.clone(),
+            });
+        }
 
         let pack = pack::load(&self.http, &self.config.pack_manifest).await?;
         (self.emit)(LaunchEvent::Preparing {
@@ -323,7 +404,25 @@ impl LaunchFlow {
                 },
             )
             .await?;
-        options::prepare(&layout.options(), &pack.default_options, (self.work_area)()).await;
+        Ok(Prepared {
+            session,
+            installation,
+            layout,
+            default_options: pack.default_options,
+            at: Instant::now(),
+        })
+    }
+
+    // 메모리와 options.txt 는 시작 버튼을 누른 때의 것을 쓴다. 기다리는 동안 설정에서 바꾼 메모리가 그대로 들어간다
+    async fn start(&self, prepared: Prepared) -> Result<Child, AuthError> {
+        let Prepared {
+            session,
+            installation,
+            layout,
+            default_options,
+            ..
+        } = prepared;
+        options::prepare(&layout.options(), &default_options, (self.work_area)()).await;
 
         (self.emit)(LaunchEvent::Launching {
             server: installation.server.clone(),
@@ -444,6 +543,15 @@ mod tests {
         assert!(busy.hold().is_none());
         drop(held);
         assert!(busy.hold().is_some());
+    }
+
+    #[test]
+    fn waits_for_the_play_button_unless_the_player_already_chose_to_start() {
+        let step = |name: &str| serde_json::from_str::<Step>(&format!("\"{name}\"")).unwrap();
+        assert!(!step("retry").starts_the_game());
+        assert!(!step("switchAccount").starts_the_game());
+        assert!(step("continueAnyway").starts_the_game());
+        assert!(step("play").starts_the_game());
     }
 
     #[test]
