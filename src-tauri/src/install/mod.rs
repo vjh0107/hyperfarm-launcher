@@ -12,7 +12,9 @@ use serde::Serialize;
 
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
-use download::{DownloadTask, Downloader, Hash, Progress, io_error, move_into_place};
+use download::{
+    DownloadTask, Downloader, Hash, Progress, io_error, move_into_place, remove_when_free,
+};
 use metadata::{
     AssetIndex, AssetIndexRef, FabricProfile, RuntimeIndex, RuntimeManifest, VersionInfo,
     VersionManifest,
@@ -244,9 +246,10 @@ impl GameInstaller {
         }
         let natives = self.layout.version(&version.id).join("natives");
         for sub in ["java", "jna", "lwjgl", "netty"] {
-            tokio::fs::create_dir_all(natives.join(sub))
+            let directory = natives.join(sub);
+            tokio::fs::create_dir_all(&directory)
                 .await
-                .map_err(io_error)?;
+                .map_err(io_error(&directory))?;
         }
 
         let mut classpath: Vec<PathBuf> = libraries.into_iter().map(|task| task.target).collect();
@@ -407,16 +410,22 @@ impl GameInstaller {
         for (path, file) in &runtime.files {
             let target = root.join(path);
             match file.kind.as_str() {
-                "directory" => tokio::fs::create_dir_all(&target).await.map_err(io_error)?,
+                "directory" => tokio::fs::create_dir_all(&target)
+                    .await
+                    .map_err(io_error(&target))?,
                 #[cfg(unix)]
                 "link" => {
                     if let Some(link) = &file.target
                         && tokio::fs::symlink_metadata(&target).await.is_err()
                     {
                         if let Some(parent) = target.parent() {
-                            tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
+                            tokio::fs::create_dir_all(parent)
+                                .await
+                                .map_err(io_error(parent))?;
                         }
-                        tokio::fs::symlink(link, &target).await.map_err(io_error)?;
+                        tokio::fs::symlink(link, &target)
+                            .await
+                            .map_err(io_error(&target))?;
                     }
                 }
                 #[cfg(unix)]
@@ -424,12 +433,12 @@ impl GameInstaller {
                     use std::os::unix::fs::PermissionsExt;
                     let mut permissions = tokio::fs::metadata(&target)
                         .await
-                        .map_err(io_error)?
+                        .map_err(io_error(&target))?
                         .permissions();
                     permissions.set_mode(permissions.mode() | 0o111);
                     tokio::fs::set_permissions(&target, permissions)
                         .await
-                        .map_err(io_error)?;
+                        .map_err(io_error(&target))?;
                 }
                 _ => {}
             }
@@ -546,11 +555,11 @@ pub async fn prune_mods(
                 .await
                 .is_ok_and(|metadata| metadata.is_file());
         if is_jar {
-            tokio::fs::remove_file(&path).await.map_err(io_error)?;
+            remove_when_free(&path).await.map_err(io_error(&path))?;
         }
     }
     let names: Vec<&str> = mods.iter().map(|file| file.file_name.as_str()).collect();
-    let json = serde_json::to_vec(&names).map_err(|error| io_error(error.into()))?;
+    let json = serde_json::to_vec(&names).map_err(|error| io_error(&record)(error.into()))?;
     // 기록을 남기지 못하면 다음 실행이 지난 기록으로 지울 것을 고를 뿐이라 게임은 켠다
     if let Err(error) = write_record(directory, &record, &json).await {
         log::warn!("Could not keep {}: {error}", record.display());
@@ -606,7 +615,9 @@ fn without_heap_size(argument: Argument) -> Argument {
 }
 
 async fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, LauncherError> {
-    let text = tokio::fs::read_to_string(path).await.map_err(io_error)?;
+    let text = tokio::fs::read_to_string(path)
+        .await
+        .map_err(io_error(path))?;
     serde_json::from_str(&text).map_err(|error| {
         log::warn!("Unreadable {}: {error}", path.display());
         LauncherError::new(Problem::CorruptDownload, "게임 정보 파일을 읽지 못했어요.")

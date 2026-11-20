@@ -13,7 +13,10 @@ use crate::error::{LauncherError, Problem};
 const PARALLEL_DOWNLOADS: usize = 16;
 const ATTEMPTS: u32 = 3;
 const FREE_SPACE_MARGIN: u64 = 256 * 1024 * 1024;
-const RENAME_ATTEMPTS: u32 = 5;
+// 백신은 막 받은 파일을 검사하는 동안 그 파일을 붙잡는다. 40MB 가 넘는 하이퍼팜 모드 jar 는 그 검사가 2초를 넘겨, 예전의
+// 다섯 번(모두 2초)으로는 모자랐다. 열두 번이면 모두 13초 남짓 기다린다
+const HELD_ATTEMPTS: u32 = 12;
+const HELD_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Hash {
@@ -177,7 +180,9 @@ impl Downloader {
         root: &Path,
         progress: Progress,
     ) -> Result<(), LauncherError> {
-        tokio::fs::create_dir_all(root).await.map_err(io_error)?;
+        tokio::fs::create_dir_all(root)
+            .await
+            .map_err(io_error(root))?;
         let tasks = fitting(missing, usable_space(root))?;
         let total: u64 = tasks.iter().map(|task| task.expected_bytes()).sum();
         let done = AtomicU64::new(0);
@@ -210,7 +215,9 @@ async fn fetch(
         .target
         .parent()
         .expect("download targets always live in a directory");
-    tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(io_error(parent))?;
     let file_name = task
         .target
         .file_name()
@@ -236,7 +243,7 @@ async fn fetch(
             Ok(()) => {
                 move_into_place(&partial, &task.target)
                     .await
-                    .map_err(io_error)?;
+                    .map_err(io_error(&task.target))?;
                 return Ok(());
             }
             Err(error) => {
@@ -249,7 +256,7 @@ async fn fetch(
                             Problem::CorruptDownload,
                             format!("받은 파일이 손상됐어요. ({file_name})"),
                         ),
-                        TransferError::Io(_) => io_error(std::io::Error::other("write failed")),
+                        TransferError::Io(error) => io_error(&partial)(error),
                         TransferError::Network(_) => LauncherError::network(),
                     });
                 }
@@ -353,21 +360,37 @@ fn fitting(missing: &[DownloadTask], usable: u64) -> Result<Vec<&DownloadTask>, 
         .collect())
 }
 
-// 백신이 막 받은 파일을 검사하는 동안 Windows 는 그 파일의 이름 바꾸기를 PermissionDenied 로 거절한다
 pub(crate) async fn move_into_place(from: &Path, to: &Path) -> std::io::Result<()> {
+    while_held(|| tokio::fs::rename(from, to)).await
+}
+
+pub(crate) async fn remove_when_free(path: &Path) -> std::io::Result<()> {
+    while_held(|| tokio::fs::remove_file(path)).await
+}
+
+async fn while_held<F, Operation>(mut operation: F) -> std::io::Result<()>
+where
+    F: FnMut() -> Operation,
+    Operation: Future<Output = std::io::Result<()>>,
+{
     let mut attempt = 1;
     loop {
-        match tokio::fs::rename(from, to).await {
-            Err(error)
-                if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && attempt < RENAME_ATTEMPTS =>
-            {
-                tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+        match operation().await {
+            Err(error) if is_held(&error) && attempt < HELD_ATTEMPTS => {
+                let wait = Duration::from_millis(200 * u64::from(attempt));
+                tokio::time::sleep(wait.min(HELD_WAIT_LIMIT)).await;
                 attempt += 1;
             }
             result => return result,
         }
     }
+}
+
+// Windows 는 다른 프로그램이 붙잡은 파일을 바꾸거나 지우는 것을 PermissionDenied(5)나 공유 위반(32·33)으로 거절한다.
+// 32·33 은 다른 운영체제에서는 다른 뜻이다
+pub(crate) fn is_held(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+        || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)))
 }
 
 fn usable_space(path: &Path) -> u64 {
@@ -394,12 +417,17 @@ fn available_on<'a>(path: &Path, disks: impl Iterator<Item = (&'a Path, u64)>) -
         .unwrap_or(u64::MAX)
 }
 
-pub fn io_error(error: std::io::Error) -> LauncherError {
-    log::warn!("File system error: {error}");
-    LauncherError::new(
-        Problem::CorruptDownload,
-        "게임 폴더에 파일을 쓰지 못했어요.",
-    )
+// 같은 문구가 여러 자리에서 나오므로 로그에는 어느 파일이었는지를 함께 남긴다
+pub fn io_error(path: &Path) -> impl FnOnce(std::io::Error) -> LauncherError + '_ {
+    move |error| {
+        log::warn!("File system error at {}: {error}", path.display());
+        let message = if is_held(&error) {
+            "백신 같은 다른 프로그램이 게임 파일을 막고 있어요. 잠시 뒤 다시 시도해 주세요."
+        } else {
+            "게임 폴더에 파일을 쓰지 못했어요."
+        };
+        LauncherError::new(Problem::CorruptDownload, message)
+    }
 }
 
 #[cfg(test)]

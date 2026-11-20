@@ -209,3 +209,50 @@ async fn waits_for_a_target_that_is_locked_for_a_moment() {
 
     assert_eq!(std::fs::read(locked.join("a.jar")).unwrap(), BODY);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn waits_to_remove_a_file_that_is_held_for_a_moment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let locked = root.path().join("mods");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::write(locked.join("old.jar"), BODY).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let unlock = {
+        let locked = locked.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        })
+    };
+
+    remove_when_free(&locked.join("old.jar")).await.unwrap();
+    unlock.await.unwrap();
+
+    assert!(!locked.join("old.jar").exists());
+}
+
+#[test]
+fn tells_the_player_when_another_program_holds_the_file() {
+    let error = |kind| io_error(Path::new("mods/hyperfarm.jar"))(std::io::Error::from(kind));
+
+    assert_eq!(
+        error(std::io::ErrorKind::PermissionDenied).message,
+        "백신 같은 다른 프로그램이 게임 파일을 막고 있어요. 잠시 뒤 다시 시도해 주세요."
+    );
+    assert_eq!(
+        error(std::io::ErrorKind::NotFound).message,
+        "게임 폴더에 파일을 쓰지 못했어요."
+    );
+}
+
+#[test]
+fn treats_a_windows_sharing_violation_as_held() {
+    let sharing = std::io::Error::from_raw_os_error(32);
+    let lock = std::io::Error::from_raw_os_error(33);
+
+    assert_eq!(is_held(&sharing), cfg!(windows));
+    assert_eq!(is_held(&lock), cfg!(windows));
+}
