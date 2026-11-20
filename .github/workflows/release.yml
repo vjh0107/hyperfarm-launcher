@@ -71,6 +71,33 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+      # 서명이 ad-hoc 이면 designated requirement 가 없어 TCC 가 저장한 마이크 허용을 다음 요청에서 검증하지 못하고
+      # 매번 다시 묻는다. 고정 인증서로 서명하면 requirement 가 그 인증서에 묶여 업데이트 뒤에도 허용이 남는다.
+      # tauri 의 APPLE_CERTIFICATE 는 Apple 이 발급한 이름(Developer ID Application: 등)의 인증서만 찾으므로 자체 서명
+      # 인증서는 여기서 keychain 에 넣고, tauri 에는 APPLE_SIGNING_IDENTITY 만 넘겨 앱 서명 뒤 updater 아티팩트를 만들게 한다
+      - name: Import the macOS signing certificate
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          base64 --decode <<< "$MACOS_SIGNING_CERTIFICATE" > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -f pkcs12 \
+            -P "$MACOS_SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          identity=$(security find-identity -p codesigning "$keychain" | awk '/"HyperFarm Launcher"/ { print $2; exit }')
+          if [ -z "$identity" ]; then
+            echo "::error::the signing certificate has no HyperFarm Launcher identity"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -80,6 +107,14 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release-id }}
           includeUpdaterJson: true
           args: --target ${{ matrix.target }}
+      - name: Check the macOS signature
+        if: runner.os == 'macOS'
+        run: |
+          app="src-tauri/target/${{ matrix.target }}/release/bundle/macos/HyperFarm.app"
+          codesign --verify --deep --strict "$app"
+          expected="certificate root = H\"$(tr '[:upper:]' '[:lower:]' <<< "$APPLE_SIGNING_IDENTITY")\""
+          codesign -d -r- "$app" 2>&1 | grep -F "$expected" ||
+            { echo "::error::the app is not bound to the signing certificate"; exit 1; }
 
   # 웹의 받기 단추와 런처의 자동 업데이트가 pack.hyperf.kr/launcher/ 의 고정 이름을 본다(hyperfarm-web 의
   # src/lib/launcher.ts, tauri.conf.json 의 updater). 판마다 releases/<판>/ 에 남긴 뒤 고정 이름을 그 판으로 올리므로

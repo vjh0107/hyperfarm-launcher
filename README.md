@@ -110,10 +110,14 @@ cd src-tauri && HYPERFARM_TEST_LIVE_HOME=/tmp/hyperfarm-live cargo test installs
 바꾼다. 작업 흐름과 릴리스 순서는 [CONTRIBUTING](CONTRIBUTING.md) 에 있다.
 
 `release` 환경 secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`(업데이트 서명),
+`MACOS_SIGNING_CERTIFICATE`(p12 base64), `MACOS_SIGNING_CERTIFICATE_PASSWORD`(macOS 앱 서명),
 `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`. 이 환경은 main 과 `v*` 태그에서만 열린다.
 
-macOS 앱은 서명하지 않았다. 처음 열 때 Finder 에서 앱을 우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보
-보호 및 보안에서 "그래도 열기" 를 누른다. Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.
+macOS 앱은 `HyperFarm Launcher` 자체 서명 인증서로 서명하고 notarization 은 하지 않는다. 서명이 하는 일은 TCC 가
+마이크 허용을 그 인증서에 묶어 기억하게 하는 것뿐이라 Gatekeeper 경고는 그대로다. 처음 열 때 Finder 에서 앱을
+우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보 보호 및 보안에서 "그래도 열기" 를 누른다. **인증서를 바꾸면
+모든 플레이어가 마이크 권한을 다시 받는다** — 바꿀 때는 `smoke.yml` 의 `SIGNING_CERTIFICATE_SHA1` 도 함께 바꾼다.
+Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.
 
 ## Privacy
 

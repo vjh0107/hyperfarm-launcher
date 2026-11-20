@@ -58,6 +58,7 @@ jobs:
     runs-on: macos-latest
     env:
       BASE: https://pack.hyperf.kr/launcher
+      SIGNING_CERTIFICATE_SHA1: f323677ea32fe687c0fa0e6cb14a56139af7a37d
     steps:
       - name: Check the disk image
         run: |
@@ -75,6 +76,13 @@ jobs:
           fi
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q x86_64
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q arm64
+          # 0.1.8 까지는 ad-hoc 서명이다. 인증서가 바뀌면 TCC 가 저장한 마이크 허용이 모든 플레이어에게서 풀리므로
+          # requirement 가 지금 인증서에 묶였는지 본다
+          if [ "$(printf '%s\n' 0.1.8 "$version" | sort -V | tail -1)" != 0.1.8 ]; then
+            codesign --verify --deep --strict mnt/HyperFarm.app
+            codesign -d -r- mnt/HyperFarm.app 2>&1 | grep -F "certificate root = H\"$SIGNING_CERTIFICATE_SHA1\"" ||
+              { echo "::error::the app is not bound to the HyperFarm Launcher certificate"; exit 1; }
+          fi
           test -L mnt/Applications
           cp -R mnt/HyperFarm.app .
           hdiutil detach mnt
