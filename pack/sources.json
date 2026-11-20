@@ -12,7 +12,7 @@
     {"slug": "immediatelyfast"},
     {"slug": "entityculling"},
     {"slug": "dynamic-fps"},
-    {"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.2.jar"}
+    {"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.3.jar"}
   ],
   "shaderpacks": [
     {"slug": "bsl-shaders"},
