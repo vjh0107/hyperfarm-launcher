@@ -71,6 +71,7 @@ pub struct DownloadTask {
     pub size: Option<u64>,
     pub hash: Option<Hash>,
     pub content_addressed: bool,
+    pub optional: bool,
 }
 
 impl DownloadTask {
@@ -81,7 +82,14 @@ impl DownloadTask {
             size,
             hash,
             content_addressed: false,
+            optional: false,
         }
+    }
+
+    // 받지 못해도 게임은 켤 수 있는 파일이다. 실패하면 남기기만 하고 나머지 설치를 멈추지 않는다
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 
     // 에셋은 경로가 곧 해시라 크기만 맞으면 같은 파일이다. 매번 3천 개를 다시 해시하면 실행이 몇 초 늦어진다
@@ -92,6 +100,7 @@ impl DownloadTask {
             size: Some(size),
             hash: Some(hash),
             content_addressed: true,
+            optional: false,
         }
     }
 
@@ -178,7 +187,15 @@ impl Downloader {
             .try_for_each_concurrent(PARALLEL_DOWNLOADS, |task| {
                 let done = &done;
                 let progress = &progress;
-                async move { fetch(&self.client, task, done, total, progress).await }
+                async move {
+                    match fetch(&self.client, task, done, total, progress).await {
+                        Err(error) if task.optional => {
+                            log::warn!("Skipped {}: {}", task.url, error.message);
+                            Ok(())
+                        }
+                        result => result,
+                    }
+                }
             })
             .await
     }
