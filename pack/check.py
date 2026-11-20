@@ -20,11 +20,11 @@ def fail(message):
 manifest = json.loads((PACK / "manifest.json").read_text())
 sources = json.loads((PACK / "sources.json").read_text())
 
-if "serverResourcePack" in manifest and not manifest["serverResourcePack"].startswith("https://"):
-    fail("serverResourcePack must be an https URL")
-
-if manifest.get("serverResourcePack") != sources.get("serverResourcePack"):
-    fail("serverResourcePack differs from sources.json; run pack/resolve.py")
+for key in ("serverResourcePack", "serverResourcePackUrl"):
+    if key in manifest and not manifest[key].startswith("https://"):
+        fail(f"{key} must be an https URL")
+    if manifest.get(key) != sources.get(key):
+        fail(f"{key} differs from sources.json; run pack/resolve.py")
 
 for key in ("minecraftVersion", "fabricLoaderVersion", "server"):
     if not isinstance(manifest.get(key), str) or not manifest[key]:

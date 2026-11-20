@@ -111,13 +111,15 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > release/notes.md
           ls -l release
           test -s release/latest.json
+          scripts/check-latest.sh release/latest.json
       - name: Publish to R2
         run: scripts/publish-launcher.sh release "${GITHUB_REF_NAME#v}"
       - name: Check what players get
         run: |
-          latest=$(curl -sf -A "hyperfarm-launcher/ci" "$PUBLIC_BASE/latest.json")
-          [ "$(jq -r .version <<<"$latest")" = "${GITHUB_REF_NAME#v}" ]
-          for url in $(jq -r '.platforms[].url' <<<"$latest" | sort -u); do
+          curl -sf -A "hyperfarm-launcher/ci" "$PUBLIC_BASE/latest.json" -o "$RUNNER_TEMP/latest.json"
+          scripts/check-latest.sh "$RUNNER_TEMP/latest.json"
+          [ "$(jq -r .version "$RUNNER_TEMP/latest.json")" = "${GITHUB_REF_NAME#v}" ]
+          for url in $(jq -r '.platforms[].url' "$RUNNER_TEMP/latest.json" | sort -u); do
             curl -sfI -A "hyperfarm-launcher/ci" "$url" >/dev/null
           done
       - name: Publish the release
