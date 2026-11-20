@@ -27,6 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: python3 pack/check.py
+      - name: Download every file in the pack
+        run: python3 pack/verify.py
       - name: Keep this pack
         run: >
           aws s3 cp pack/manifest.json "$R2/packs/$GITHUB_SHA.json" --endpoint-url "$ENDPOINT" --only-show-errors

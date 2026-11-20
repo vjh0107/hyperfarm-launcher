@@ -2,7 +2,7 @@ name: Install smoke
 
 on:
   workflow_run:
-    workflows: [Release, Rollback]
+    workflows: [Release, Rollback, Pack]
     types: [completed]
   workflow_dispatch:
 
