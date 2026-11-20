@@ -39,7 +39,7 @@ pub async fn redeem(http: &Http, web_base: &str, code: &str) -> Option<LaunchTic
             None
         }
         Err(error) => {
-            log::warn!("Could not redeem the launch ticket; continuing without it: {error}");
+            log::warn!("Could not redeem the launch ticket {code}; continuing without it: {error}");
             None
         }
     }
