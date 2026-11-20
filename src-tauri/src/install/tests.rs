@@ -160,6 +160,66 @@ async fn starts_from_the_saved_fabric_profile_while_the_meta_server_is_down() {
     assert_eq!(unsaved.problem, Problem::Network);
 }
 
+#[cfg(unix)]
+struct ReadOnly(PathBuf);
+
+#[cfg(unix)]
+impl ReadOnly {
+    fn new(directory: &Path) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+        Self(directory.to_path_buf())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn starts_from_a_fresh_fabric_profile_it_cannot_keep() {
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"id": "fabric-loader-0.20.1-26.3", "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient", "libraries": []}"#,
+        ))
+        .mount(&server)
+        .await;
+    let root = tempfile::tempdir().unwrap();
+    let _read_only = ReadOnly::new(root.path());
+
+    let profile = fabric_profile(
+        &Http::new(),
+        &format!("{}/profile/json", server.uri()),
+        &root.path().join("versions/fabric/fabric.json"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(profile.id, "fabric-loader-0.20.1-26.3");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn finishes_pruning_when_it_cannot_write_the_record() {
+    let mods = tempfile::tempdir().unwrap();
+    std::fs::write(mods.path().join("sodium.jar"), "ours").unwrap();
+    let _read_only = ReadOnly::new(mods.path());
+
+    prune_mods(&[pack_file("sodium.jar")], mods.path(), true)
+        .await
+        .unwrap();
+
+    assert!(!mods.path().join(INSTALLED_MODS).exists());
+}
+
 #[test]
 fn refuses_pack_file_names_that_leave_the_mods_directory() {
     for name in ["../evil.jar", "a/b.jar", "a\\b.jar", ".hidden.jar"] {

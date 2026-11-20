@@ -1,11 +1,14 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::download::{DownloadTask, Hash};
 use super::metadata::Library;
 use super::rules::{Platform, allows};
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
+
+const CHECKSUM_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct MavenCoordinate {
     group: String,
@@ -85,15 +88,50 @@ pub fn resolve(
 // Fabric 메타는 로더 jar 에 해시를 싣지 않는다. 해시가 없으면 깨진 jar 도 자리에 있기만 하면 그대로 쓰인다
 pub async fn fill_missing_hashes(http: &Http, tasks: &mut [DownloadTask]) {
     for task in tasks.iter_mut().filter(|task| task.hash.is_none()) {
+        let kept = sha1_beside(&task.target);
+        if let Some(hex) = tokio::fs::read_to_string(&kept)
+            .await
+            .ok()
+            .as_deref()
+            .and_then(parse_sha1)
+        {
+            task.hash = Some(Hash::sha1(hex));
+            continue;
+        }
         let url = format!("{}.sha1", task.url);
-        match http.get_text(&url).await {
-            Ok(text) => match parse_sha1(&text) {
-                Some(hex) => task.hash = Some(Hash::sha1(hex)),
-                None => log::warn!("{url} does not hold a SHA-1"),
-            },
-            Err(error) => log::warn!("Could not fetch {url}: {error}"),
+        let text = match tokio::time::timeout(CHECKSUM_TIMEOUT, http.get_text(&url)).await {
+            Ok(Ok(text)) => text,
+            Ok(Err(error)) => {
+                log::warn!("Could not fetch {url}: {error}");
+                continue;
+            }
+            Err(_) => {
+                log::warn!("Could not fetch {url} within {CHECKSUM_TIMEOUT:?}");
+                continue;
+            }
+        };
+        let Some(hex) = parse_sha1(&text) else {
+            log::warn!("{url} does not hold a SHA-1");
+            continue;
+        };
+        task.hash = Some(Hash::sha1(hex));
+        if let Err(error) = keep_sha1(&kept, hex).await {
+            log::warn!("Could not keep {}: {error}", kept.display());
         }
     }
+}
+
+fn sha1_beside(jar: &Path) -> PathBuf {
+    let mut name = jar.as_os_str().to_owned();
+    name.push(".sha1");
+    PathBuf::from(name)
+}
+
+async fn keep_sha1(file: &Path, hex: &str) -> std::io::Result<()> {
+    if let Some(parent) = file.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(file, hex).await
 }
 
 fn parse_sha1(text: &str) -> Option<&str> {
@@ -236,6 +274,7 @@ mod tests {
             sha1: None,
             size: None,
         };
+        let root = tempfile::tempdir().unwrap();
         let mut tasks = resolve(
             &[
                 library("net.fabricmc:fabric-loader:0.20.1"),
@@ -243,7 +282,7 @@ mod tests {
             ],
             &[],
             &windows(),
-            Path::new("/libs"),
+            root.path(),
         )
         .unwrap();
 
@@ -251,6 +290,45 @@ mod tests {
 
         assert_eq!(tasks[0].hash, Some(Hash::sha1(&sha1)));
         assert_eq!(tasks[1].hash, None);
+    }
+
+    #[tokio::test]
+    async fn asks_for_the_maven_checksum_only_until_it_keeps_one_beside_the_jar() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let sha1 = "4f".repeat(20);
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(sha1.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let unhashed = || {
+            resolve(
+                &[Library {
+                    name: "net.fabricmc:fabric-loader:0.20.1".into(),
+                    downloads: None,
+                    rules: vec![],
+                    url: Some(server.uri()),
+                    sha1: None,
+                    size: None,
+                }],
+                &[],
+                &windows(),
+                root.path(),
+            )
+            .unwrap()
+        };
+        let http = Http::new();
+
+        let mut first = unhashed();
+        fill_missing_hashes(&http, &mut first).await;
+        let mut again = unhashed();
+        fill_missing_hashes(&http, &mut again).await;
+
+        assert_eq!(first[0].hash, Some(Hash::sha1(&sha1)));
+        assert_eq!(again[0].hash, Some(Hash::sha1(&sha1)));
     }
 
     #[test]
