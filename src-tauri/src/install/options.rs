@@ -14,7 +14,17 @@ const DATA_VERSION: u32 = 5023;
 const GUI_SCALE: &str = "guiScale";
 const FORCE_UNICODE_FONT: &str = "forceUnicodeFont";
 const KEY_PREFIX: &str = "key_";
-const SMOOTH_CAMERA: &str = "key_key.smoothCamera";
+// 26.3 과 지금 모드 구성에서 기본으로 키가 없는 조작이다. 게임이 처음 파일을 쓰기 전이나 그 모드가 새로 들어온 첫 실행에는
+// 줄이 없어 게임이 Not bound 로 두므로, 줄이 없으면 미리 F24 로 넣는다
+const UNBOUND_BY_DEFAULT: [&str; 7] = [
+    "key_key.smoothCamera",
+    "key_key.spectatorOutlines",
+    "key_key.dynamic_fps.toggle_forced",
+    "key_key.dynamic_fps.toggle_disabled",
+    "key_key.entityculling.toggle",
+    "key_key.entityculling.toggleBoxes",
+    "key_key.hyperfarm.voice.deafen",
+];
 const UNBOUND: &str = "key.keyboard.unknown";
 const UNPRESSED_KEY: &str = "key.keyboard.f24";
 
@@ -60,10 +70,13 @@ pub async fn prepare(
     let Some(text) = edit(existing.as_deref(), defaults, scale) else {
         return;
     };
+    let before = existing.as_deref().and_then(|old| option(old, GUI_SCALE));
+    let after = option(&text, GUI_SCALE);
+    let set_scale = if after == before { None } else { after };
     match write(file, &text).await {
-        Ok(()) => match (work_area, scale) {
+        Ok(()) => match (work_area, set_scale) {
             (Some(area), Some(scale)) => log::info!(
-                "Updated {}; the default GUI scale for a {}x{} work area at {}x is {scale}",
+                "Set the default GUI scale in {} for a {}x{} work area at {}x to {scale}",
                 file.display(),
                 area.width,
                 area.height,
@@ -73,6 +86,14 @@ pub async fn prepare(
         },
         Err(error) => log::warn!("Could not write {}: {error}", file.display()),
     }
+}
+
+fn option<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
+    contents
+        .lines()
+        .rev()
+        .find_map(|line| entry(line).filter(|(name, _)| *name == key))
+        .map(|(_, value)| value)
 }
 
 async fn write(file: &Path, text: &str) -> std::io::Result<()> {
@@ -122,8 +143,10 @@ fn bind_unbound_keys(lines: &mut Vec<String>, ending: &str) -> bool {
             changed = true;
         }
     }
-    if value(lines, SMOOTH_CAMERA).is_none() {
-        changed |= set(lines, SMOOTH_CAMERA, UNPRESSED_KEY, ending);
+    for key in UNBOUND_BY_DEFAULT {
+        if value(lines, key).is_none() {
+            changed |= set(lines, key, UNPRESSED_KEY, ending);
+        }
     }
     changed
 }
@@ -164,8 +187,10 @@ fn created(defaults: &BTreeMap<String, String>, gui_scale: Option<u32>) -> Optio
     for (key, value) in defaults {
         text.push_str(&format!("{key}:{value}\n"));
     }
-    if !defaults.contains_key(SMOOTH_CAMERA) {
-        text.push_str(&format!("{SMOOTH_CAMERA}:{UNPRESSED_KEY}\n"));
+    for key in UNBOUND_BY_DEFAULT {
+        if !defaults.contains_key(key) {
+            text.push_str(&format!("{key}:{UNPRESSED_KEY}\n"));
+        }
     }
     if let Some(scale) = gui_scale
         && !defaults.contains_key(GUI_SCALE)
