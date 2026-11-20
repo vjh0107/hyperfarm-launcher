@@ -85,5 +85,6 @@
   ],
   "defaultOptions": {
     "lang": "ko_kr"
-  }
+  },
+  "serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip"
 }

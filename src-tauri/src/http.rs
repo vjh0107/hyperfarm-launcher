@@ -8,6 +8,7 @@ use crate::error::LauncherError;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
@@ -75,6 +76,8 @@ impl Http {
         let client = Client::builder()
             .user_agent(concat!("hyperfarm-launcher/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(CONNECT_TIMEOUT)
+            // 파일 받기에는 전체 시간 제한을 둘 수 없어, 데이터가 멎은 연결은 이것이 없으면 영영 기다린다
+            .read_timeout(READ_TIMEOUT)
             .build()
             .expect("the HTTP client has a valid static configuration");
         Self { client }
@@ -86,6 +89,10 @@ impl Http {
 
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, HttpError> {
         read(url, self.client.get(url)).await
+    }
+
+    pub async fn get_text(&self, url: &str) -> Result<String, HttpError> {
+        text(url, self.client.get(url)).await
     }
 
     pub async fn get_json_bearer<T: DeserializeOwned>(
@@ -124,11 +131,15 @@ impl Default for Http {
 }
 
 async fn read<T: DeserializeOwned>(url: &str, request: RequestBuilder) -> Result<T, HttpError> {
-    let response = request
-        .header("Accept", "application/json")
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .await?;
+    let body = text(url, request.header("Accept", "application/json")).await?;
+    serde_json::from_str(&body).map_err(|source| HttpError::Decode {
+        url: url.to_string(),
+        source,
+    })
+}
+
+async fn text(url: &str, request: RequestBuilder) -> Result<String, HttpError> {
+    let response = request.timeout(REQUEST_TIMEOUT).send().await?;
     let status = response.status();
     let body = response.text().await?;
     if !status.is_success() {
@@ -138,8 +149,5 @@ async fn read<T: DeserializeOwned>(url: &str, request: RequestBuilder) -> Result
             body,
         });
     }
-    serde_json::from_str(&body).map_err(|source| HttpError::Decode {
-        url: url.to_string(),
-        source,
-    })
+    Ok(body)
 }

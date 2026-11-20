@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
-use download::{DownloadTask, Downloader, Hash, Progress, io_error};
+use download::{DownloadTask, Downloader, Hash, Progress, io_error, move_into_place};
 use metadata::{
     AssetIndex, AssetIndexRef, FabricProfile, RuntimeIndex, RuntimeManifest, VersionInfo,
     VersionManifest,
@@ -25,6 +25,8 @@ const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_m
 const JAVA_RUNTIMES: &str = "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
 const FABRIC_META: &str = "https://meta.fabricmc.net/v2/versions/loader";
 const ASSET_OBJECTS: &str = "https://resources.download.minecraft.net";
+const HOSTED: &str = "https://pack.hyperf.kr/";
+const INSTALLED_MODS: &str = ".hyperfarm-installed.json";
 
 #[derive(Clone, Debug)]
 pub struct GameLayout {
@@ -120,23 +122,33 @@ impl GameInstaller {
     ) -> Result<Installation, LauncherError> {
         let update = self.layout.version(&pack.minecraft_version).is_dir();
         let version = self.version(&pack.minecraft_version).await?;
-        let fabric: FabricProfile = self
-            .http
-            .get_json(&format!(
+        let fabric_id = format!(
+            "fabric-loader-{}-{}",
+            pack.fabric_loader_version, pack.minecraft_version
+        );
+        let fabric = fabric_profile(
+            &self.http,
+            &format!(
                 "{FABRIC_META}/{}/{}/profile/json",
                 pack.minecraft_version, pack.fabric_loader_version
-            ))
-            .await?;
+            ),
+            &self
+                .layout
+                .version(&fabric_id)
+                .join(format!("{fabric_id}.json")),
+        )
+        .await?;
         let assets = self.asset_index(&version.asset_index).await?;
         let component = version.java_version.component.clone();
         let runtime = self.runtime(&component).await?;
 
-        let libraries = library::resolve(
+        let mut libraries = library::resolve(
             &fabric.libraries,
             &version.libraries,
             &self.platform,
             &self.layout.libraries(),
         )?;
+        library::fill_missing_hashes(&self.http, &mut libraries).await;
         let client_jar = self
             .layout
             .version(&version.id)
@@ -173,7 +185,7 @@ impl GameInstaller {
         }
         dedupe(&mut tasks);
         let server_pack = pack
-            .server_resource_pack
+            .server_resource_pack_url
             .as_deref()
             .map(|url| ServerPack::new(url, &self.layout.root));
         let pending_pack = match &server_pack {
@@ -264,27 +276,30 @@ impl GameInstaller {
     }
 
     async fn version(&self, id: &str) -> Result<VersionInfo, LauncherError> {
-        let manifest: VersionManifest = self.http.get_json(VERSION_MANIFEST).await?;
-        let entry = manifest
-            .versions
-            .into_iter()
-            .find(|entry| entry.id == id)
-            .ok_or_else(|| {
-                LauncherError::new(
-                    Problem::PackInvalid,
-                    format!("마인크래프트 {id} 을 찾지 못했어요."),
-                )
-            })?;
         let file = self.layout.version(id).join(format!("{id}.json"));
-        self.downloader
-            .fetch_one(&DownloadTask::new(
-                &entry.url,
-                file.clone(),
-                None,
-                Some(Hash::sha1(&entry.sha1)),
-            ))
-            .await?;
-        read_json(&file).await
+        or_saved(&file, async {
+            let manifest: VersionManifest = self.http.get_json(VERSION_MANIFEST).await?;
+            let entry = manifest
+                .versions
+                .into_iter()
+                .find(|entry| entry.id == id)
+                .ok_or_else(|| {
+                    LauncherError::new(
+                        Problem::PackInvalid,
+                        format!("마인크래프트 {id} 을 찾지 못했어요."),
+                    )
+                })?;
+            self.downloader
+                .fetch_one(&DownloadTask::new(
+                    &entry.url,
+                    file.clone(),
+                    None,
+                    Some(Hash::sha1(&entry.sha1)),
+                ))
+                .await?;
+            read_json(&file).await
+        })
+        .await
     }
 
     async fn asset_index(&self, reference: &AssetIndexRef) -> Result<AssetIndex, LauncherError> {
@@ -312,27 +327,30 @@ impl GameInstaller {
             )
         };
         let key = self.platform.java_runtime_key().ok_or_else(unsupported)?;
-        let index: RuntimeIndex = self.http.get_json(JAVA_RUNTIMES).await?;
-        let variant = index
-            .get(key)
-            .and_then(|components| components.get(component))
-            .and_then(|v| v.first())
-            .ok_or_else(unsupported)?;
-        let manifest = &variant.manifest;
         let file = self
             .layout
             .root
             .join("runtime")
             .join(format!("{component}.json"));
-        self.downloader
-            .fetch_one(&DownloadTask::new(
-                &manifest.url,
-                file.clone(),
-                Some(manifest.size),
-                Some(Hash::sha1(&manifest.sha1)),
-            ))
-            .await?;
-        read_json(&file).await
+        or_saved(&file, async {
+            let index: RuntimeIndex = self.http.get_json(JAVA_RUNTIMES).await?;
+            let variant = index
+                .get(key)
+                .and_then(|components| components.get(component))
+                .and_then(|v| v.first())
+                .ok_or_else(unsupported)?;
+            let manifest = &variant.manifest;
+            self.downloader
+                .fetch_one(&DownloadTask::new(
+                    &manifest.url,
+                    file.clone(),
+                    Some(manifest.size),
+                    Some(Hash::sha1(&manifest.sha1)),
+                ))
+                .await?;
+            read_json(&file).await
+        })
+        .await
     }
 
     fn asset_tasks(&self, assets: &AssetIndex) -> Vec<DownloadTask> {
@@ -414,14 +432,69 @@ fn pack_tasks(files: &[PackFile], directory: &Path) -> Result<Vec<DownloadTask>,
     files
         .iter()
         .map(|file| {
+            let hash = Hash::sha512(&file.sha512);
+            // Cloudflare 가 쿼리 없는 pack.hyperf.kr 주소를 엣지에 옛 판으로 담아 두어 해시가 맞지 않고 실행이 멈췄다
+            // (2026-11-20). 판마다 다른 쿼리로 받는다
+            let url = if file.url.starts_with(HOSTED) {
+                let expected = hash.expected();
+                with_query(&file.url, expected.get(..16).unwrap_or(expected))
+            } else {
+                file.url.clone()
+            };
             Ok(DownloadTask::new(
-                &file.url,
+                &url,
                 directory.join(file.safe_file_name()?),
                 Some(file.size),
-                Some(Hash::sha512(&file.sha512)),
+                Some(hash),
             ))
         })
         .collect()
+}
+
+fn with_query(url: &str, version: &str) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}v={version}")
+}
+
+async fn fabric_profile(
+    http: &Http,
+    url: &str,
+    file: &Path,
+) -> Result<FabricProfile, LauncherError> {
+    or_saved(file, async {
+        let text = http.get_text(url).await?;
+        let profile = serde_json::from_str(&text).map_err(|error| {
+            log::warn!("{url} sent an unreadable Fabric profile: {error}");
+            LauncherError::network()
+        })?;
+        if let Some(parent) = file.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
+        }
+        let partial = file.with_extension("json.part");
+        tokio::fs::write(&partial, text).await.map_err(io_error)?;
+        move_into_place(&partial, file).await.map_err(io_error)?;
+        Ok(profile)
+    })
+    .await
+}
+
+// 메타 서버가 멎어도 지난번에 받아 둔 것으로 게임을 켠다
+async fn or_saved<T: serde::de::DeserializeOwned>(
+    file: &Path,
+    fetch: impl Future<Output = Result<T, LauncherError>>,
+) -> Result<T, LauncherError> {
+    match fetch.await {
+        Err(error)
+            if error.problem == Problem::Network
+                && tokio::fs::metadata(file)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_file()) =>
+        {
+            log::warn!("Could not refresh {}; using the saved one", file.display());
+            read_json(file).await
+        }
+        result => result,
+    }
 }
 
 fn dedupe(tasks: &mut Vec<DownloadTask>) {
@@ -429,26 +502,48 @@ fn dedupe(tasks: &mut Vec<DownloadTask>) {
     tasks.retain(|task| seen.insert(task.target.clone()));
 }
 
+// 플레이어가 고른 폴더에는 남이 둔 모드가 있을 수 있다. 지우는 것은 launcher 가 깔았다고 적어 둔 jar 뿐이고,
+// 적어 둔 것이 없는 첫 실행에서는 아무것도 지우지 않는다
 pub async fn prune_mods(mods: &[PackFile], directory: &Path) -> Result<(), LauncherError> {
-    let Ok(mut entries) = tokio::fs::read_dir(directory).await else {
-        return Ok(());
-    };
+    let record = directory.join(INSTALLED_MODS);
+    let installed = read_installed(&record).await;
     let wanted: std::collections::HashSet<&str> =
         mods.iter().map(|file| file.file_name.as_str()).collect();
-    while let Some(entry) = entries.next_entry().await.map_err(io_error)? {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let is_file = entry
-            .file_type()
-            .await
-            .map(|kind| kind.is_file())
-            .unwrap_or(false);
-        if is_file && name.ends_with(".jar") && !wanted.contains(name.as_str()) {
-            tokio::fs::remove_file(entry.path())
+    for name in installed
+        .iter()
+        .filter(|name| !wanted.contains(name.as_str()))
+    {
+        let path = directory.join(name);
+        let is_jar = name.ends_with(".jar")
+            && !name.contains(['/', '\\'])
+            && tokio::fs::symlink_metadata(&path)
                 .await
-                .map_err(io_error)?;
+                .is_ok_and(|metadata| metadata.is_file());
+        if is_jar {
+            tokio::fs::remove_file(&path).await.map_err(io_error)?;
         }
     }
-    Ok(())
+    let names: Vec<&str> = mods.iter().map(|file| file.file_name.as_str()).collect();
+    let json = serde_json::to_vec(&names).map_err(|error| io_error(error.into()))?;
+    tokio::fs::create_dir_all(directory)
+        .await
+        .map_err(io_error)?;
+    tokio::fs::write(record, json).await.map_err(io_error)
+}
+
+async fn read_installed(record: &Path) -> Vec<String> {
+    let bytes = match tokio::fs::read(record).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            log::warn!("Could not read {}: {error}", record.display());
+            return Vec::new();
+        }
+    };
+    serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        log::warn!("Ignoring unreadable {}: {error}", record.display());
+        Vec::new()
+    })
 }
 
 pub async fn write_default_options(

@@ -2003,6 +2003,7 @@ dependencies = [
  "base64 0.23.1",
  "dirs",
  "discord-rich-presence",
+ "dunce",
  "futures-util",
  "hex",
  "keyring",
