@@ -131,7 +131,7 @@ function errorContent(error: LauncherError): ErrorContent {
     case "UNSUPPORTED_PLATFORM":
       return { title: "이 PC에서는 실행할 수 없어요", body: error.message, primary: close };
     case "GAME_EXITED":
-      return { title: "게임이 바로 꺼졌어요", body: error.message, secondary: { label: "로그 열기", run: () => void invoke("open_game_logs") }, primary: retry };
+      return { title: "게임이 바로 꺼졌어요", body: error.message, secondary: { label: "로그 열기", run: () => void invoke("open_game_log") }, primary: retry };
   }
 }
 
