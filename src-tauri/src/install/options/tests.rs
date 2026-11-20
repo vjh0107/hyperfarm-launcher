@@ -281,10 +281,12 @@ fn keeps_a_backend_the_player_chose() {
 }
 
 #[test]
-fn finds_an_amd_display_adapter_in_the_registry_listing() {
-    let nvidia = "HKEY_LOCAL_MACHINE\\...\\0001\r\n    ProviderName    REG_SZ    NVIDIA\r\n";
-    let amd = "HKEY_LOCAL_MACHINE\\...\\0000\r\n    ProviderName    REG_SZ    Advanced Micro Devices, Inc.\r\n";
+fn finds_an_amd_adapter_among_the_present_ones() {
+    let others = "Intel Corporation\r\nNVIDIA\r\n";
 
-    assert!(!mentions_amd(nvidia));
-    assert!(mentions_amd(&format!("{nvidia}{amd}")));
+    assert!(!mentions_amd(others));
+    assert!(mentions_amd(&format!(
+        "{others}Advanced Micro Devices, Inc.\r\n"
+    )));
+    assert!(!mentions_amd("ATI Technologies Inc.\r\n"));
 }

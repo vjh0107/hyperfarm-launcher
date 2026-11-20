@@ -27,9 +27,12 @@ const UNBOUND: &str = "key.keyboard.unknown";
 const GRAPHICS_BACKEND: &str = "preferredGraphicsBackend";
 const DEFAULT_BACKEND: &str = "\"default\"";
 const VULKAN_BACKEND: &str = "\"vulkan\"";
+// 레지스트리의 디스플레이 클래스 키는 뺀 카드의 것도 남는다. Win32_VideoController 는 지금 꽂힌 어댑터만 낸다
 #[cfg(windows)]
-const DISPLAY_ADAPTERS: &str =
-    r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+const PRESENT_ADAPTER_VENDORS: &str =
+    "(Get-CimInstance Win32_VideoController).AdapterCompatibility";
+#[cfg(windows)]
+const ADAPTER_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const UNPRESSED_KEY: &str = "key.keyboard.f24";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -157,23 +160,41 @@ pub fn edit(
 #[cfg(windows)]
 pub async fn amd_display_adapter() -> bool {
     use std::process::Stdio;
-    let reg = std::env::var_os("SystemRoot")
+    let powershell = std::env::var_os("SystemRoot")
         .map_or_else(|| r"C:\Windows".into(), std::path::PathBuf::from)
-        .join("System32")
-        .join("reg.exe");
-    let mut command = tokio::process::Command::new(reg);
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let mut command = tokio::process::Command::new(powershell);
     command
-        .args(["query", DISPLAY_ADAPTERS, "/s", "/v", "ProviderName"])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            PRESENT_ADAPTER_VENDORS,
+        ])
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
+        .kill_on_drop(true)
         .creation_flags(0x0800_0000);
-    match command.output().await {
-        Ok(output) => mentions_amd(&String::from_utf8_lossy(&output.stdout)),
-        Err(error) => {
+    let output = match tokio::time::timeout(ADAPTER_QUERY_TIMEOUT, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
             log::warn!("Could not list the display adapters: {error}");
-            false
+            return false;
         }
+        Err(_) => {
+            log::warn!("Listing the display adapters took longer than {ADAPTER_QUERY_TIMEOUT:?}");
+            return false;
+        }
+    };
+    let vendors = String::from_utf8_lossy(&output.stdout);
+    if vendors.trim().is_empty() {
+        log::warn!(
+            "Listing the display adapters gave nothing ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        return false;
     }
+    mentions_amd(&vendors)
 }
 
 #[cfg(not(windows))]
@@ -185,7 +206,7 @@ pub async fn amd_display_adapter() -> bool {
 fn mentions_amd(providers: &str) -> bool {
     providers
         .lines()
-        .any(|line| line.contains("Advanced Micro Devices") || line.contains("ATI Technologies"))
+        .any(|line| line.contains("Advanced Micro Devices"))
 }
 
 // 26.3 은 입력을 SDL 로 받으면서 키를 정하지 않은 동작을 Fn·IME 전환 같은 알 수 없는 키에도 일으킨다(MC-311949,
@@ -267,10 +288,7 @@ fn created(
         ));
     }
     if prefer_vulkan && !defaults.contains_key(GRAPHICS_BACKEND) {
-        text.push_str(&format!(
-            "{GRAPHICS_BACKEND}:{VULKAN_BACKEND}
-"
-        ));
+        text.push_str(&format!("{GRAPHICS_BACKEND}:{VULKAN_BACKEND}\n"));
     }
     Some(text)
 }
