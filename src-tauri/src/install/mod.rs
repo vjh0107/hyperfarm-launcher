@@ -1,11 +1,11 @@
 pub mod download;
 pub mod library;
 pub mod metadata;
+pub mod options;
 pub mod pack;
 pub mod rules;
 mod server_pack;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -64,6 +64,10 @@ impl GameLayout {
 
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
+    }
+
+    pub fn options(&self) -> PathBuf {
+        self.root.join("options.txt")
     }
 }
 
@@ -227,7 +231,6 @@ impl GameInstaller {
         }
         self.finish_runtime(&runtime, &component).await?;
         prune_mods(&pack.mods, &self.layout.mods(), self.owns_folder).await?;
-        write_default_options(&pack.default_options, &self.layout.root.join("options.txt")).await?;
 
         let java = self
             .layout
@@ -575,23 +578,6 @@ async fn jars_in(directory: &Path) -> Vec<String> {
         }
     }
     jars
-}
-
-pub async fn write_default_options(
-    defaults: &BTreeMap<String, String>,
-    options: &Path,
-) -> Result<(), LauncherError> {
-    if defaults.is_empty() || tokio::fs::try_exists(options).await.unwrap_or(false) {
-        return Ok(());
-    }
-    if let Some(parent) = options.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
-    }
-    let text: String = defaults
-        .iter()
-        .map(|(key, value)| format!("{key}:{value}\n"))
-        .collect();
-    tokio::fs::write(options, text).await.map_err(io_error)
 }
 
 // 힙 크기는 런처 설정의 메모리가 정한다. Mojang 의 기본값(-Xmx4G)이 남으면 뒤에 붙인 설정과 겹친다

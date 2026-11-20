@@ -21,6 +21,7 @@ use tauri_plugin_updater::UpdaterExt;
 use tokio::process::Child;
 
 use flow::{LaunchEvent, LaunchFlow, Step};
+use install::options::WorkArea;
 use settings::{LauncherConfig, LauncherSettings};
 
 const LAUNCH_EVENT: &str = "launch";
@@ -292,6 +293,27 @@ fn release_summary(body: &str) -> Option<String> {
     (!title.is_empty()).then(|| title.to_string())
 }
 
+// 게임 창은 주 모니터에 뜬다. 모르면 options.txt 의 배율을 건드리지 않는다
+fn primary_work_area(app: &AppHandle) -> Option<WorkArea> {
+    let monitor = match app.primary_monitor() {
+        Ok(Some(monitor)) => monitor,
+        Ok(None) => {
+            log::info!("No primary monitor; leaving the GUI scale to the game");
+            return None;
+        }
+        Err(error) => {
+            log::warn!("Could not read the primary monitor: {error}");
+            return None;
+        }
+    };
+    let size = monitor.work_area().size;
+    Some(WorkArea {
+        width: size.width,
+        height: size.height,
+        scale_factor: monitor.scale_factor(),
+    })
+}
+
 fn accept_links(app: &AppHandle, urls: impl IntoIterator<Item = String>) -> bool {
     let flow = app.state::<Flow>();
     urls.into_iter().any(|url| flow.accept_uri(&url))
@@ -337,7 +359,14 @@ pub fn run() {
             let emit = Arc::new(move |event: LaunchEvent| {
                 let _ = emitter.emit(LAUNCH_EVENT, event);
             });
-            let flow = Arc::new(LaunchFlow::new(LauncherConfig::load(), browser, emit));
+            let screens = handle.clone();
+            let work_area = Arc::new(move || primary_work_area(&screens));
+            let flow = Arc::new(LaunchFlow::new(
+                LauncherConfig::load(),
+                browser,
+                emit,
+                work_area,
+            ));
             flow.restore_kept_ticket();
             app.manage::<Flow>(flow);
 

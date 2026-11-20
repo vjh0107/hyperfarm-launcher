@@ -13,6 +13,10 @@
   sha512 로 플레이어 PC 가 직접 받고, 우리는 다시 올리지 않는다. launcher 는 자기가 깐 jar 를
   `mods/.hyperfarm-installed.json` 에 적어 두고, 그 가운데 manifest 에서 빠진 것만 지운다. 플레이어가 둔 jar 와, 그 기록이
   없는 폴더의 jar 는 지우지 않는다.
+- 게임을 켜기 직전에 `options.txt` 의 `guiScale` 이 없거나 자동(0)이면, 주 모니터의 작업 영역에서 창을 최대화했을 때
+  서버의 Vellum 화면(GUI 좌표 629×452)이 잘리지 않는 가장 큰 배율을 넣는다. FHD 는 2, 1366×768 은 1, 4K 는 4 다.
+  `forceUnicodeFont` 가 켜져 있으면 게임이 홀수를 짝수로 올리므로 한 칸 내린다. 플레이어가 고른 1 이상의 값은
+  건드리지 않고, 모니터를 알지 못하면 아무것도 쓰지 않는다. 파일이 없으면 manifest 의 `defaultOptions` 와 함께 만든다.
 
 ## 받기
 
