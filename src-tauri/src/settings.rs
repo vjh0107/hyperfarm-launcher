@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 pub const CLIENT_ID: &str = "0d78a481-dd72-458d-9a39-2eb991abdba2";
 const WEB_BASE: &str = "https://hyperf.kr";
 const PACK_MANIFEST: &str = "https://pack.hyperf.kr/launcher/manifest.json";
-const SIXTEEN_GIGABYTES: u64 = 16 * 1024 * 1024 * 1024;
+// 16GB 를 꽂은 PC 도 펌웨어와 내장 그래픽이 떼어 가 OS 에는 15.xGiB 로 보인다. 16GiB 로 가르면 그 PC 들이 모두 아래 칸에 든다
+const LARGER_HEAP_FROM: u64 = 15 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct LauncherConfig {
@@ -46,7 +47,7 @@ pub struct LauncherSettings {
 impl LauncherSettings {
     pub fn defaults(total_memory_bytes: u64) -> Self {
         Self {
-            memory_megabytes: if total_memory_bytes >= SIXTEEN_GIGABYTES {
+            memory_megabytes: if total_memory_bytes >= LARGER_HEAP_FROM {
                 6144
             } else {
                 4096
@@ -108,7 +109,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("launcher.json");
         std::fs::write(&file, "{not json").unwrap();
-        let store = SettingsStore::new(file, SIXTEEN_GIGABYTES);
+        let store = SettingsStore::new(file, LARGER_HEAP_FROM);
         assert_eq!(
             store.load(),
             LauncherSettings {
@@ -119,9 +120,18 @@ mod tests {
     }
 
     #[test]
-    fn gives_less_memory_below_sixteen_gigabytes() {
+    fn gives_a_sixteen_gigabyte_pc_the_larger_heap() {
+        let reported_by_windows = 16_947_000_000;
         assert_eq!(
-            LauncherSettings::defaults(SIXTEEN_GIGABYTES - 1).memory_megabytes,
+            LauncherSettings::defaults(reported_by_windows).memory_megabytes,
+            6144
+        );
+    }
+
+    #[test]
+    fn gives_less_memory_below_fifteen_gibibytes() {
+        assert_eq!(
+            LauncherSettings::defaults(LARGER_HEAP_FROM - 1).memory_megabytes,
             4096
         );
     }

@@ -13,8 +13,6 @@ maxFps:120
 lang:ko_kr
 key_key.smoothCamera:key.keyboard.f24
 key_key.spectatorOutlines:key.keyboard.f24
-key_key.dynamic_fps.toggle_forced:key.keyboard.f24
-key_key.dynamic_fps.toggle_disabled:key.keyboard.f24
 key_key.entityculling.toggle:key.keyboard.f24
 key_key.entityculling.toggleBoxes:key.keyboard.f24
 key_key.hyperfarm.voice.deafen:key.keyboard.f24
