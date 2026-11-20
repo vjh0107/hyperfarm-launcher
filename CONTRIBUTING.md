@@ -9,6 +9,23 @@ main 에는 직접 올리지 않고 PR 로 들어옵니다. CI(`lint`, Linux·ma
 PR 에는 릴리스 노트의 분류가 되는 라벨을 하나 붙입니다 — `enhancement`, `bug`, `pack`(모드 구성),
 `dependencies`. 노트에 남길 것이 없으면 `skip-changelog` 입니다.
 
+## 리뷰
+
+PR 의 새 head 마다 `pr-review.yml` 이 [CLAUDE.md](CLAUDE.md) 의 `## PR 리뷰` 를 기준으로 리뷰해 지적을 줄에 달고, 상태
+댓글 하나를 고쳐 씁니다. 두 번째부터는 지난 리뷰 뒤로 바뀐 파일만 보고, 그때 나온 low 는 상태 댓글의 참고에만
+적습니다. draft 에서는 돌지 않고 Ready 로 바꾸면 돕니다. draft 를 미리 보려면 Actions 의 **PR review** 를 PR
+번호로 손으로 돌립니다. `dry-run` 으로 돌리면 PR 에 아무것도 쓰지 않고 올리려던 것과 사용량을 아티팩트에
+남깁니다.
+
+리뷰는 필수 검사가 아니어서 실패해도 머지를 막지 않습니다. 대신 main ruleset 이 스레드 resolve 를 요구하므로, 달린
+지적에는 반영했으면 `반영 <SHA>`, 고치지 않으면 `고치지 않는다: <이유>` 를 답으로 달고 resolve 합니다. 다음 리뷰가
+그 답을 읽고 되묻지 않습니다. 리뷰가 끝나기 전에 머지하면 지적을 받지 못하므로, 상태 댓글이 지금 head 를
+가리키는지 보고 머지합니다.
+
+저장소 secret `CLAUDE_CODE_OAUTH_TOKEN` 으로 돌고, 모델·effort·턴 상한은 저장소 변수 `REVIEW_MODEL`·
+`REVIEW_EFFORT`·`REVIEW_MAX_TURNS` 로 바꿉니다. 바꾸기 전에는 같은 PR 을 `dry-run` 으로 돌려 사용량을 견줍니다.
+fork 와 Dependabot 의 PR 에는 secrets 가 오지 않아 돌지 않습니다.
+
 ## 확인
 
 ```bash

@@ -1,0 +1,66 @@
+name: PR review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 리뷰할 PR 번호
+        required: true
+        type: number
+      mode:
+        description: dry-run 은 PR 에 아무것도 쓰지 않고 올리려던 것과 사용량을 아티팩트에 남긴다
+        required: true
+        default: review
+        type: choice
+        options: [review, dry-run]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-review-${{ inputs.mode || 'review' }}-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  # 하는 일은 scripts/pr-review.sh 에 있다. 새 head 마다 한 번 돌고, 이미 리뷰한 head 는 몇 초 만에 끝난다.
+  # 필수 검사가 아니라서 실패해도 머지를 막지 않는다. fork 와 Dependabot 의 PR 에는 secrets 가 오지 않아 돌지 않는다
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CLAUDE_CODE_VERSION: "2.1.280"
+      REVIEW_MODEL: ${{ vars.REVIEW_MODEL || 'claude-opus-5-5' }}
+      REVIEW_EFFORT: ${{ vars.REVIEW_EFFORT || 'high' }}
+      REVIEW_MAX_TURNS: ${{ vars.REVIEW_MAX_TURNS || '60' }}
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ github.token }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      MODE: ${{ inputs.mode || 'review' }}
+    steps:
+      # claude 가 읽는 작업 트리에 token 이 남지 않도록 credential 을 git 설정에 두지 않는다
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" --no-fund --no-audit --loglevel=error
+      - run: claude --version
+      - run: scripts/pr-review.sh "$MODE"
+      - if: failure()
+        run: scripts/pr-review.sh "$MODE" failed
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-review-${{ env.PR }}-${{ github.run_attempt }}
+          path: pr-review-out/
+          retention-days: 30
