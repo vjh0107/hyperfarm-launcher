@@ -122,7 +122,7 @@ esac
 
 PULL=$(get "$API/pulls/$PR")
 HEAD=$(jq -r .head.sha <<<"$PULL")
-BASE_TIP=$(jq -r .base.sha <<<"$PULL")
+BASE_REF=$(jq -r .base.ref <<<"$PULL")
 printf '%s' "$HEAD" > "$OUT/head"
 if [ "$DRY_RUN" != 1 ] && [ "$(jq -r .state <<<"$PULL")" != open ]; then
     echo '닫힌 PR 이다. 스킵'
@@ -133,7 +133,9 @@ if [ -n "${EVENT_HEAD:-}" ] && [ "$HEAD" != "$EVENT_HEAD" ]; then
     exit 0
 fi
 git cat-file -e "$HEAD^{commit}" 2>/dev/null || git fetch -q --no-tags origin "refs/pull/$PR/head"
-git cat-file -e "$BASE_TIP^{commit}" 2>/dev/null || git fetch -q --no-tags origin "$BASE_TIP"
+# PR 의 base.sha 는 PR 을 열거나 push 한 때의 대상 브랜치라 그 뒤에 들어온 기준을 모른다. 지금의 끝을 받는다
+git fetch -q --no-tags origin "refs/heads/$BASE_REF"
+BASE_TIP=$(git rev-parse FETCH_HEAD)
 BASE=$(git merge-base "$BASE_TIP" "$HEAD")
 
 load_ours
