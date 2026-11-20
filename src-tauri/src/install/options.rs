@@ -24,6 +24,12 @@ const UNBOUND_BY_DEFAULT: [&str; 5] = [
     "key_key.hyperfarm.voice.deafen",
 ];
 const UNBOUND: &str = "key.keyboard.unknown";
+const GRAPHICS_BACKEND: &str = "preferredGraphicsBackend";
+const DEFAULT_BACKEND: &str = "\"default\"";
+const VULKAN_BACKEND: &str = "\"vulkan\"";
+#[cfg(windows)]
+const DISPLAY_ADAPTERS: &str =
+    r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
 const UNPRESSED_KEY: &str = "key.keyboard.f24";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,6 +55,7 @@ pub async fn prepare(
     file: &Path,
     defaults: &BTreeMap<String, String>,
     work_area: Option<WorkArea>,
+    prefer_vulkan: bool,
 ) {
     let existing = match tokio::fs::read(file).await {
         Ok(bytes) => match String::from_utf8(bytes) {
@@ -65,9 +72,20 @@ pub async fn prepare(
         }
     };
     let scale = work_area.map(gui_scale);
-    let Some(text) = edit(existing.as_deref(), defaults, scale) else {
+    let Some(text) = edit(existing.as_deref(), defaults, scale, prefer_vulkan) else {
         return;
     };
+    if option(&text, GRAPHICS_BACKEND) == Some(VULKAN_BACKEND)
+        && existing
+            .as_deref()
+            .and_then(|old| option(old, GRAPHICS_BACKEND))
+            != Some(VULKAN_BACKEND)
+    {
+        log::info!(
+            "Choosing the Vulkan backend in {} for an AMD display adapter",
+            file.display()
+        );
+    }
     let before = existing.as_deref().and_then(|old| option(old, GUI_SCALE));
     let after = option(&text, GUI_SCALE);
     let set_scale = if after == before { None } else { after };
@@ -108,9 +126,10 @@ pub fn edit(
     existing: Option<&str>,
     defaults: &BTreeMap<String, String>,
     gui_scale: Option<u32>,
+    prefer_vulkan: bool,
 ) -> Option<String> {
     let Some(text) = existing.filter(|text| !text.trim().is_empty()) else {
-        return created(defaults, gui_scale);
+        return created(defaults, gui_scale, prefer_vulkan);
     };
     let ending = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
@@ -124,7 +143,49 @@ pub fn edit(
         let scale = even_for_unicode(scale, unicode).to_string();
         changed |= set(&mut lines, GUI_SCALE, &scale, ending);
     }
+    if prefer_vulkan
+        && value(&lines, GRAPHICS_BACKEND).is_none_or(|chosen| chosen == DEFAULT_BACKEND)
+    {
+        changed |= set(&mut lines, GRAPHICS_BACKEND, VULKAN_BACKEND, ending);
+    }
     changed.then(|| lines.concat())
+}
+
+// 26.3 의 기본(default) 백엔드는 OpenGL 을 먼저 고른다. AMD 의 OpenGL 드라이버(atio6axx.dll)는 서버 팩으로 텍스처
+// 아틀라스를 만든 직후 0xC0000005 로 게임을 죽이고(RX 6600·6800, 런처 없이 바닐라로 켜도 같다), Vulkan 은 그 드라이버를
+// 거치지 않는다. 플레이어가 OpenGL 이나 Vulkan 을 직접 고른 값은 두고 default 일 때만 바꾼다. Iris 는 Vulkan 에서 꺼진다
+#[cfg(windows)]
+pub async fn amd_display_adapter() -> bool {
+    use std::process::Stdio;
+    let reg = std::env::var_os("SystemRoot")
+        .map_or_else(|| r"C:\Windows".into(), std::path::PathBuf::from)
+        .join("System32")
+        .join("reg.exe");
+    let mut command = tokio::process::Command::new(reg);
+    command
+        .args(["query", DISPLAY_ADAPTERS, "/s", "/v", "ProviderName"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000);
+    match command.output().await {
+        Ok(output) => mentions_amd(&String::from_utf8_lossy(&output.stdout)),
+        Err(error) => {
+            log::warn!("Could not list the display adapters: {error}");
+            false
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub async fn amd_display_adapter() -> bool {
+    false
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn mentions_amd(providers: &str) -> bool {
+    providers
+        .lines()
+        .any(|line| line.contains("Advanced Micro Devices") || line.contains("ATI Technologies"))
 }
 
 // 26.3 은 입력을 SDL 로 받으면서 키를 정하지 않은 동작을 Fn·IME 전환 같은 알 수 없는 키에도 일으킨다(MC-311949,
@@ -180,7 +241,11 @@ fn set(lines: &mut Vec<String>, key: &str, value: &str, ending: &str) -> bool {
     true
 }
 
-fn created(defaults: &BTreeMap<String, String>, gui_scale: Option<u32>) -> Option<String> {
+fn created(
+    defaults: &BTreeMap<String, String>,
+    gui_scale: Option<u32>,
+    prefer_vulkan: bool,
+) -> Option<String> {
     let mut text = format!("version:{DATA_VERSION}\n");
     for (key, value) in defaults {
         text.push_str(&format!("{key}:{value}\n"));
@@ -199,6 +264,12 @@ fn created(defaults: &BTreeMap<String, String>, gui_scale: Option<u32>) -> Optio
         text.push_str(&format!(
             "{GUI_SCALE}:{}\n",
             even_for_unicode(scale, unicode)
+        ));
+    }
+    if prefer_vulkan && !defaults.contains_key(GRAPHICS_BACKEND) {
+        text.push_str(&format!(
+            "{GRAPHICS_BACKEND}:{VULKAN_BACKEND}
+"
         ));
     }
     Some(text)

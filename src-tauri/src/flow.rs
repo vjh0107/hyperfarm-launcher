@@ -432,7 +432,14 @@ impl LaunchFlow {
             default_options,
             ..
         } = prepared;
-        options::prepare(&layout.options(), &default_options, (self.work_area)()).await;
+        let prefer_vulkan = options::amd_display_adapter().await;
+        options::prepare(
+            &layout.options(),
+            &default_options,
+            (self.work_area)(),
+            prefer_vulkan,
+        )
+        .await;
 
         (self.emit)(LaunchEvent::Launching {
             server: installation.server.clone(),
