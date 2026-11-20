@@ -72,9 +72,9 @@ pub fn command(
             .map(|template| substitute(&template, &variables))
     };
 
-    // 보이스챗이 webrtc 네이티브를 System.load 로 싣는다. Java 25 는 경고만 내지만 이후 판은 막는다.
     let mut command = vec![path(&installation.java)];
     command.extend(memory_arguments(options.memory_megabytes));
+    // 보이스챗이 webrtc 네이티브를 System.load 로 싣는다. Java 25 는 경고만 내지만 이후 판은 막는다.
     command.push("--enable-native-access=ALL-UNNAMED".into());
     command.extend(substitute(&installation.jvm_arguments));
     command.push(installation.main_class.clone());

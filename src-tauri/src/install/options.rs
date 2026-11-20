@@ -16,11 +16,9 @@ const FORCE_UNICODE_FONT: &str = "forceUnicodeFont";
 const KEY_PREFIX: &str = "key_";
 // 26.3 과 지금 모드 구성에서 기본으로 키가 없는 조작이다. 게임이 처음 파일을 쓰기 전이나 그 모드가 새로 들어온 첫 실행에는
 // 줄이 없어 게임이 Not bound 로 두므로, 줄이 없으면 미리 F24 로 넣는다
-const UNBOUND_BY_DEFAULT: [&str; 7] = [
+const UNBOUND_BY_DEFAULT: [&str; 5] = [
     "key_key.smoothCamera",
     "key_key.spectatorOutlines",
-    "key_key.dynamic_fps.toggle_forced",
-    "key_key.dynamic_fps.toggle_disabled",
     "key_key.entityculling.toggle",
     "key_key.entityculling.toggleBoxes",
     "key_key.hyperfarm.voice.deafen",
