@@ -106,7 +106,14 @@ impl Authenticator {
         ticket: Option<&LaunchTicket>,
         waiting: &Waiting,
     ) -> Result<MinecraftSession, LauncherError> {
-        let login_hint = ticket.and_then(|ticket| ticket.login_hint.as_deref());
+        // 웹이 어느 계정인지 알려 주지 않았는데 조용히 끝내면 브라우저에 남은 아무 계정으로 들어가고, 견줄 ticket 도 없다
+        let Some(ticket) = ticket else {
+            let tokens = self
+                .interactive(Prompt::SelectAccount, None, waiting)
+                .await?;
+            return self.complete(tokens, None).await;
+        };
+        let login_hint = ticket.login_hint.as_deref();
         let tokens = match self
             .microsoft
             .sign_in(Prompt::None, login_hint, SILENT_TIMEOUT, None)
