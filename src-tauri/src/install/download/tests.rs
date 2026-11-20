@@ -209,3 +209,50 @@ async fn waits_for_a_target_that_is_locked_for_a_moment() {
 
     assert_eq!(std::fs::read(locked.join("a.jar")).unwrap(), BODY);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn waits_to_remove_a_file_that_is_held_for_a_moment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let locked = root.path().join("mods");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::write(locked.join("old.jar"), BODY).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let unlock = {
+        let locked = locked.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        })
+    };
+
+    remove_when_free(&locked.join("old.jar")).await.unwrap();
+    unlock.await.unwrap();
+
+    assert!(!locked.join("old.jar").exists());
+}
+
+#[test]
+fn blames_another_program_only_for_a_windows_file_that_stayed_held() {
+    let jar = Path::new("mods/hyperfarm.jar");
+    let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    let held = if cfg!(windows) { HELD } else { WRITE_FAILED };
+
+    assert_eq!(held_error(jar)(denied()).message, held);
+    assert_eq!(
+        held_error(jar)(std::io::Error::from(std::io::ErrorKind::NotFound)).message,
+        WRITE_FAILED
+    );
+    assert_eq!(io_error(jar)(denied()).message, WRITE_FAILED);
+}
+
+#[test]
+fn treats_a_windows_sharing_violation_as_held() {
+    let sharing = std::io::Error::from_raw_os_error(32);
+    let lock = std::io::Error::from_raw_os_error(33);
+
+    assert_eq!(is_held(&sharing), cfg!(windows));
+    assert_eq!(is_held(&lock), cfg!(windows));
+}

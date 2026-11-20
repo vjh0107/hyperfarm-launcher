@@ -94,23 +94,29 @@ impl ServerPack {
         {
             return Ok(());
         }
-        let sha1 = file_sha1(&pending.task.target).await.map_err(io_error)?;
+        let sha1 = file_sha1(&pending.task.target)
+            .await
+            .map_err(io_error(&pending.task.target))?;
         let target = cached_path(&self.downloads, &sha1);
         if let Some(parent) = target.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(io_error(parent))?;
         }
         move_into_place(&pending.task.target, &target)
             .await
-            .map_err(io_error)?;
+            .map_err(io_error(&target))?;
         let record = Record {
             url: self.url.clone(),
             version: pending.version,
             sha1,
         };
-        let json = serde_json::to_vec(&record).map_err(|error| io_error(error.into()))?;
-        tokio::fs::write(self.downloads.join(RECORD), json)
+        let record_file = self.downloads.join(RECORD);
+        let json =
+            serde_json::to_vec(&record).map_err(|error| io_error(&record_file)(error.into()))?;
+        tokio::fs::write(&record_file, json)
             .await
-            .map_err(io_error)
+            .map_err(io_error(&record_file))
     }
 
     async fn current(&self, version: &str) -> bool {
