@@ -40,6 +40,22 @@ impl HttpError {
             _ => "",
         }
     }
+
+    pub fn without_url(self) -> Self {
+        const HIDDEN: &str = "the request";
+        match self {
+            HttpError::Status { status, body, .. } => HttpError::Status {
+                url: HIDDEN.into(),
+                status,
+                body,
+            },
+            HttpError::Transport(error) => HttpError::Transport(error.without_url()),
+            HttpError::Decode { source, .. } => HttpError::Decode {
+                url: HIDDEN.into(),
+                source,
+            },
+        }
+    }
 }
 
 impl From<HttpError> for LauncherError {
