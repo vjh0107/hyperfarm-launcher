@@ -11,6 +11,7 @@ guiScale:0
 debugGuiScale:0
 maxFps:120
 lang:ko_kr
+key_key.smoothCamera:key.keyboard.f24
 ";
 
 fn korean() -> BTreeMap<String, String> {
@@ -108,13 +109,16 @@ fn keeps_windows_line_endings() {
 fn creates_the_file_with_the_data_version_defaults_and_scale() {
     assert_eq!(
         edit(None, &korean(), Some(2)).as_deref(),
-        Some("version:5023\nlang:ko_kr\nguiScale:2\n")
+        Some("version:5023\nlang:ko_kr\nkey_key.smoothCamera:key.keyboard.f24\nguiScale:2\n")
     );
     assert_eq!(
         edit(None, &korean(), None).as_deref(),
-        Some("version:5023\nlang:ko_kr\n")
+        Some("version:5023\nlang:ko_kr\nkey_key.smoothCamera:key.keyboard.f24\n")
     );
-    assert_eq!(edit(None, &BTreeMap::new(), None), None);
+    assert_eq!(
+        edit(None, &BTreeMap::new(), None).as_deref(),
+        Some("version:5023\nkey_key.smoothCamera:key.keyboard.f24\n")
+    );
 }
 
 #[test]
@@ -144,6 +148,76 @@ fn lowers_an_odd_scale_the_unicode_font_would_round_up() {
     );
 }
 
+#[test]
+fn binds_every_unbound_key_to_one_nobody_presses() {
+    let unbound = WRITTEN_BY_THE_GAME.replace(
+        "smoothCamera:key.keyboard.f24",
+        "smoothCamera:key.keyboard.unknown",
+    ) + "key_key.entityculling.toggle:key.keyboard.unknown\nkey_key.jump:key.keyboard.space\n";
+
+    assert_eq!(
+        edit(Some(&unbound), &korean(), None).unwrap(),
+        format!(
+            "{WRITTEN_BY_THE_GAME}key_key.entityculling.toggle:key.keyboard.f24\nkey_key.jump:key.keyboard.space\n"
+        )
+    );
+}
+
+#[test]
+fn keeps_a_key_the_player_chose_for_the_cinematic_camera() {
+    let chosen = WRITTEN_BY_THE_GAME.replace(
+        "smoothCamera:key.keyboard.f24",
+        "smoothCamera:key.keyboard.equal",
+    );
+
+    assert_eq!(edit(Some(&chosen), &korean(), None), None);
+}
+
+#[test]
+fn adds_the_cinematic_camera_key_when_the_file_has_none() {
+    let without = WRITTEN_BY_THE_GAME.replace("key_key.smoothCamera:key.keyboard.f24\n", "");
+
+    assert_eq!(
+        edit(Some(&without), &korean(), None).unwrap(),
+        WRITTEN_BY_THE_GAME
+    );
+}
+
+#[test]
+fn binds_unbound_keys_with_windows_line_endings() {
+    let windows = WRITTEN_BY_THE_GAME
+        .replace(
+            "smoothCamera:key.keyboard.f24",
+            "smoothCamera:key.keyboard.unknown",
+        )
+        .replace('\n', "\r\n");
+
+    assert_eq!(
+        edit(Some(&windows), &korean(), None).unwrap(),
+        WRITTEN_BY_THE_GAME.replace('\n', "\r\n")
+    );
+}
+
+#[test]
+fn binds_unbound_keys_and_fills_the_scale_together() {
+    let both = WRITTEN_BY_THE_GAME.replace(
+        "smoothCamera:key.keyboard.f24",
+        "smoothCamera:key.keyboard.unknown",
+    );
+
+    assert_eq!(
+        edit(Some(&both), &korean(), Some(2)).unwrap(),
+        WRITTEN_BY_THE_GAME.replace("guiScale:0\n", "guiScale:2\n")
+    );
+}
+
+#[test]
+fn leaves_unbound_values_outside_key_bindings_alone() {
+    let text = format!("{WRITTEN_BY_THE_GAME}lastServer:key.keyboard.unknown\n");
+
+    assert_eq!(edit(Some(&text), &korean(), None), None);
+}
+
 #[tokio::test]
 async fn fills_the_scale_once_and_then_leaves_the_players_choice() {
     let root = tempfile::tempdir().unwrap();
@@ -153,14 +227,12 @@ async fn fills_the_scale_once_and_then_leaves_the_players_choice() {
     prepare(&file, &korean(), fhd).await;
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "version:5023\nlang:ko_kr\nguiScale:2\n"
+        "version:5023\nlang:ko_kr\nkey_key.smoothCamera:key.keyboard.f24\nguiScale:2\n"
     );
 
-    std::fs::write(&file, "version:5023\nlang:en_us\nguiScale:3\n").unwrap();
+    let chosen = "version:5023\nlang:en_us\nguiScale:3\nkey_key.smoothCamera:key.keyboard.f24\n";
+    std::fs::write(&file, chosen).unwrap();
     prepare(&file, &korean(), fhd).await;
-    assert_eq!(
-        std::fs::read_to_string(&file).unwrap(),
-        "version:5023\nlang:en_us\nguiScale:3\n"
-    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), chosen);
     assert!(!root.path().join("options.txt.part").exists());
 }
