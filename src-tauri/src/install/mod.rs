@@ -102,6 +102,7 @@ pub struct GameInstaller {
     downloader: Downloader,
     layout: GameLayout,
     platform: Platform,
+    owns_folder: bool,
 }
 
 impl GameInstaller {
@@ -112,7 +113,13 @@ impl GameInstaller {
             downloader,
             layout,
             platform,
+            owns_folder: false,
         }
+    }
+
+    pub fn owning_folder(mut self, owns: bool) -> Self {
+        self.owns_folder = owns;
+        self
     }
 
     pub async fn install(
@@ -219,7 +226,7 @@ impl GameInstaller {
             log::warn!("Could not keep the server resource pack: {}", error.message);
         }
         self.finish_runtime(&runtime, &component).await?;
-        prune_mods(&pack.mods, &self.layout.mods()).await?;
+        prune_mods(&pack.mods, &self.layout.mods(), self.owns_folder).await?;
         write_default_options(&pack.default_options, &self.layout.root.join("options.txt")).await?;
 
         let java = self
@@ -503,10 +510,19 @@ fn dedupe(tasks: &mut Vec<DownloadTask>) {
 }
 
 // 플레이어가 고른 폴더에는 남이 둔 모드가 있을 수 있다. 지우는 것은 launcher 가 깔았다고 적어 둔 jar 뿐이고,
-// 적어 둔 것이 없는 첫 실행에서는 아무것도 지우지 않는다
-pub async fn prune_mods(mods: &[PackFile], directory: &Path) -> Result<(), LauncherError> {
+// 적어 둔 것이 없는 첫 실행에서는 아무것도 지우지 않는다. 다만 기본 게임 폴더는 launcher 만 쓰고, 기록이 생기기 전
+// 판이 깐 옛 jar 를 남기면 새 판과 겹쳐 Fabric 이 뜨지 않으므로 기록이 없을 때 그 폴더의 jar 를 전부 launcher 것으로 본다
+pub async fn prune_mods(
+    mods: &[PackFile],
+    directory: &Path,
+    owns_unrecorded: bool,
+) -> Result<(), LauncherError> {
     let record = directory.join(INSTALLED_MODS);
-    let installed = read_installed(&record).await;
+    let installed = match read_installed(&record).await {
+        Some(installed) => installed,
+        None if owns_unrecorded => jars_in(directory).await,
+        None => Vec::new(),
+    };
     let wanted: std::collections::HashSet<&str> =
         mods.iter().map(|file| file.file_name.as_str()).collect();
     for name in installed
@@ -531,19 +547,34 @@ pub async fn prune_mods(mods: &[PackFile], directory: &Path) -> Result<(), Launc
     tokio::fs::write(record, json).await.map_err(io_error)
 }
 
-async fn read_installed(record: &Path) -> Vec<String> {
+async fn read_installed(record: &Path) -> Option<Vec<String>> {
     let bytes = match tokio::fs::read(record).await {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
             log::warn!("Could not read {}: {error}", record.display());
-            return Vec::new();
+            return Some(Vec::new());
         }
     };
-    serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+    Some(serde_json::from_slice(&bytes).unwrap_or_else(|error| {
         log::warn!("Ignoring unreadable {}: {error}", record.display());
         Vec::new()
-    })
+    }))
+}
+
+async fn jars_in(directory: &Path) -> Vec<String> {
+    let Ok(mut entries) = tokio::fs::read_dir(directory).await else {
+        return Vec::new();
+    };
+    let mut jars = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Some(name) = entry.file_name().to_str()
+            && name.ends_with(".jar")
+        {
+            jars.push(name.to_string());
+        }
+    }
+    jars
 }
 
 pub async fn write_default_options(

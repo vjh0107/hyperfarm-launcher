@@ -31,6 +31,7 @@ async fn prunes_only_jars_it_installed_that_left_the_manifest() {
     prune_mods(
         &[pack_file("sodium-old.jar"), pack_file("lithium.jar")],
         mods.path(),
+        false,
     )
     .await
     .unwrap();
@@ -39,6 +40,7 @@ async fn prunes_only_jars_it_installed_that_left_the_manifest() {
     prune_mods(
         &[pack_file("sodium-new.jar"), pack_file("lithium.jar")],
         mods.path(),
+        false,
     )
     .await
     .unwrap();
@@ -55,11 +57,27 @@ async fn keeps_every_jar_in_a_folder_it_has_not_installed_into() {
     std::fs::write(mods.path().join("sodium.jar"), "ours").unwrap();
     std::fs::write(mods.path().join("players-own.jar"), "theirs").unwrap();
 
-    prune_mods(&[pack_file("sodium.jar")], mods.path())
+    prune_mods(&[pack_file("sodium.jar")], mods.path(), false)
         .await
         .unwrap();
 
     assert_eq!(names_in(mods.path()), ["players-own.jar", "sodium.jar"]);
+}
+
+#[tokio::test]
+async fn clears_old_jars_from_its_own_folder_before_it_kept_a_record() {
+    let mods = tempfile::tempdir().unwrap();
+    std::fs::write(mods.path().join("sodium-0.9.2.jar"), "older launcher").unwrap();
+    std::fs::write(mods.path().join("sodium-0.9.3.jar"), "ours").unwrap();
+    std::fs::write(mods.path().join("sodium.toml"), "config").unwrap();
+
+    prune_mods(&[pack_file("sodium-0.9.3.jar")], mods.path(), true)
+        .await
+        .unwrap();
+
+    let mut left = names_in(mods.path());
+    left.retain(|name| !name.starts_with('.'));
+    assert_eq!(left, ["sodium-0.9.3.jar", "sodium.toml"]);
 }
 
 #[test]

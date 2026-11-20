@@ -302,7 +302,8 @@ impl LaunchFlow {
         let layout = GameLayout::new(self.game_directory());
         mark_game_root(&layout.root);
         let installer =
-            GameInstaller::new(self.http.clone(), layout.clone(), self.platform.clone());
+            GameInstaller::new(self.http.clone(), layout.clone(), self.platform.clone())
+                .owning_folder(layout.root == self.config.home);
         let installation = installer
             .install(
                 &pack,
