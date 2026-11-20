@@ -245,7 +245,9 @@ impl LaunchFlow {
                     .player_name(&web_player_id)
                     .await
                     .unwrap_or_else(|| "웹 계정".into());
-                // 이름을 묻는 사이 로그아웃했으면 불일치 세션을 두지 않는다. 두면 "이 계정으로 시작" 이 로그아웃한 계정으로 켠다
+                // 이름을 묻는 사이 로그아웃했으면 불일치 세션을 두지 않는다. 두면 "이 계정으로 시작" 이 로그아웃한 계정으로 켠다.
+                // 잠금을 먼저 잡고 견준다. sign_out 은 세대를 올린 뒤 이 잠금을 기다려 비우므로, 견준 뒤의 로그아웃도 지운다
+                let mut mismatched = self.mismatched.lock().unwrap();
                 if self.signed_out_since(sign_outs) {
                     log::info!("Signed out during the account mismatch; dropping its session");
                     LaunchEvent::Failed {
@@ -258,7 +260,7 @@ impl LaunchFlow {
                         session_player_id: session.player_id.clone(),
                         session_name: session.name.clone(),
                     };
-                    *self.mismatched.lock().unwrap() = Some(session);
+                    *mismatched = Some(session);
                     event
                 }
             }
