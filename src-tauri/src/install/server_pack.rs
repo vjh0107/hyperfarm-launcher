@@ -39,7 +39,8 @@ impl ServerPack {
     }
 
     pub async fn prepare(&self, client: &reqwest::Client) -> Option<PendingServerPack> {
-        let response = match client.head(&self.url).send().await {
+        let probe = with_query(&self.url, &format!("{:x}", rand::random::<u64>()));
+        let response = match client.head(probe).send().await {
             Ok(response) if response.status().is_success() => response,
             Ok(response) => {
                 log::warn!("The server resource pack answered {}", response.status());
@@ -58,7 +59,8 @@ impl ServerPack {
                 .unwrap_or_default()
                 .to_string()
         };
-        let size = response.content_length();
+        // HEAD 응답은 본문이 없어 content_length() 가 0 을 줄 때가 있다
+        let size = header(reqwest::header::CONTENT_LENGTH).parse::<u64>().ok();
         let version = format!(
             "{}|{}|{}",
             header(reqwest::header::ETAG),
@@ -70,13 +72,25 @@ impl ServerPack {
         }
         let staging = self.downloads.join(STAGING);
         let _ = tokio::fs::remove_file(&staging).await;
+        // 게임서버는 팩을 한 경로에 덮어쓰고 플레이어에게는 서명 쿼리가 붙은 주소를 준다. 쿼리 없는 주소는 Cloudflare 가
+        // 엣지에 담아 두어 덮어쓴 뒤에도 옛 팩을 내주므로(2026-11-20 운영), 판마다 다른 쿼리를 붙여 받는다
+        let fetch = with_query(
+            &self.url,
+            &hex::encode(&Sha1::digest(version.as_bytes())[..8]),
+        );
         Some(PendingServerPack {
-            task: DownloadTask::new(&self.url, staging, size, None),
+            task: DownloadTask::new(&fetch, staging, size, None).optional(),
             version,
         })
     }
 
     pub async fn finish(&self, pending: PendingServerPack) -> Result<(), LauncherError> {
+        if !tokio::fs::try_exists(&pending.task.target)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let sha1 = file_sha1(&pending.task.target).await.map_err(io_error)?;
         let target = cached_path(&self.downloads, &sha1);
         if let Some(parent) = target.parent() {
@@ -109,6 +123,11 @@ impl ServerPack {
                 .await
                 .unwrap_or(false)
     }
+}
+
+fn with_query(url: &str, version: &str) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}v={version}")
 }
 
 fn cached_path(downloads: &Path, sha1: &str) -> PathBuf {
@@ -168,6 +187,54 @@ mod tests {
             .await
             .unwrap();
         tokio::fs::write(&pending.task.target, PACK).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetches_past_an_edge_that_still_holds_the_old_pack() {
+        use super::super::download::Downloader;
+        use wiremock::matchers::query_param_is_missing;
+
+        let server = MockServer::start().await;
+        Mock::given(method("HEAD"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("ETag", "\"new\"")
+                    .set_body_bytes(PACK),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(query_param_is_missing("v"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(b"old hyperfarm pack, larger".as_slice()),
+            )
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(PACK))
+            .mount(&server)
+            .await;
+        let game = tempfile::tempdir().unwrap();
+        let pack = ServerPack::new(&format!("{}/pack.zip", server.uri()), game.path());
+
+        let pending = pack.prepare(&reqwest::Client::new()).await.unwrap();
+        Downloader::new(reqwest::Client::new())
+            .fetch_all(
+                std::slice::from_ref(&pending.task),
+                game.path(),
+                std::sync::Arc::new(|_, _, _| {}),
+            )
+            .await
+            .unwrap();
+        pack.finish(pending).await.unwrap();
+
+        let placed = game
+            .path()
+            .join("downloads")
+            .join(PACK_DIRECTORY)
+            .join(PACK_SHA1);
+        assert_eq!(std::fs::read(placed).unwrap(), PACK);
     }
 
     #[tokio::test]

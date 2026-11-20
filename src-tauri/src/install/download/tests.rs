@@ -120,3 +120,32 @@ async fn refetches_a_file_whose_content_changed_but_kept_its_size() {
 
     assert_eq!(needed.len(), 1);
 }
+
+#[tokio::test]
+async fn keeps_going_when_an_optional_file_cannot_be_fetched() {
+    let server = serve().await;
+    let root = tempfile::tempdir().unwrap();
+    let wanted = root.path().join("a.jar");
+    let tasks = [
+        DownloadTask::new(
+            &format!("{}/file", server.uri()),
+            wanted.clone(),
+            Some(BODY.len() as u64),
+            Some(Hash::sha1(&sha1(BODY))),
+        ),
+        DownloadTask::new(
+            &format!("{}/file", server.uri()),
+            root.path().join("pack.zip"),
+            Some(BODY.len() as u64 + 1),
+            None,
+        )
+        .optional(),
+    ];
+
+    Downloader::new(reqwest::Client::new())
+        .fetch_all(&tasks, root.path(), ignore())
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(wanted).unwrap(), BODY);
+}
