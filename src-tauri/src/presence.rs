@@ -2,34 +2,29 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::activity::{Activity, Button, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use tokio::process::Child;
 
 const APPLICATION_ID: &str = "1530169660970897418";
 const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn show_until_exit(game: &mut Child, homepage: String) {
+pub async fn show(homepage: String) {
     let started = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs().cast_signed());
     let mut client = None;
     let mut refresh = tokio::time::interval(REFRESH_INTERVAL);
     loop {
-        tokio::select! {
-            status = game.wait() => {
-                log::info!("The game exited with {status:?}");
-                break;
+        refresh.tick().await;
+        let homepage = homepage.clone();
+        let publishing = tokio::task::spawn_blocking(move || publish(client, started, &homepage));
+        client = match tokio::time::timeout(ANSWER_TIMEOUT, publishing).await {
+            Ok(published) => published.ok().flatten(),
+            // IPC 에는 read timeout 이 없어 멈춘 스레드를 되찾지 못한다. 차례마다 다시 붙으면 그런 스레드가 쌓인다
+            Err(_) => {
+                log::warn!("Discord stopped answering; giving up on Rich Presence");
+                return;
             }
-            _ = refresh.tick() => {
-                let homepage = homepage.clone();
-                client = tokio::task::spawn_blocking(move || publish(client, started, &homepage))
-                    .await
-                    .ok()
-                    .flatten();
-            }
-        }
-    }
-    if let Some(mut client) = client {
-        let _ = tokio::task::spawn_blocking(move || client.close()).await;
+        };
     }
 }
 

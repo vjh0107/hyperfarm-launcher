@@ -173,7 +173,7 @@ function onLaunch(event: LaunchEvent): void {
       if (!current?.classList.contains("settings")) show(progress.root);
       break;
     case "waitingForSignIn":
-      show(loginScreen(chrome, chrome.close, () => void invoke("reopen_sign_in")));
+      show(loginScreen(chrome, () => void invoke("cancel_sign_in"), () => void invoke("reopen_sign_in")));
       break;
     case "signedIn":
       session = { playerId: event.playerId, name: event.name };

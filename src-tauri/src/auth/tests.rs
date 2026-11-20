@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::loopback::parse_query;
+use super::loopback::{LoopbackReceiver, page, parse_query};
 use super::microsoft::{MicrosoftClient, MicrosoftEndpoints};
 use super::store::{AccountStore, StoredAccount};
 use super::xbox::{XboxClient, XboxEndpoints};
@@ -328,6 +328,59 @@ async fn discards_an_expired_refresh_token_and_moves_to_the_browser() {
     assert_eq!(fixture.deletions(), 1);
     assert_eq!(fixture.opened().len(), 1);
     assert_eq!(fixture.stored(), stored(STEVE, "rt-browser"));
+}
+
+#[tokio::test]
+async fn asks_for_an_account_when_neither_the_web_nor_the_launcher_knows_one() {
+    let fixture = Fixture::new(STEVE).await;
+
+    assert!(
+        fixture
+            .authenticator()
+            .authenticate(None, &ignore)
+            .await
+            .is_ok()
+    );
+
+    let opened = fixture.opened();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(
+        opened[0].get("prompt").map(String::as_str),
+        Some("select_account")
+    );
+}
+
+#[test]
+fn shows_a_silent_sign_in_that_needs_the_player_as_the_next_step_rather_than_a_failure() {
+    let answer = |error: &str| page(&parse_query(&format!("error={error}&state=s")));
+
+    for silent in ["login_required", "interaction_required"] {
+        let shown = answer(silent);
+        assert!(shown.contains("다음 창에서 로그인해 주세요"), "{silent}");
+        assert!(!shown.contains("로그인하지 못했어요"), "{silent}");
+    }
+    assert!(answer("server_error").contains("로그인하지 못했어요"));
+}
+
+#[tokio::test]
+async fn takes_the_redirect_while_the_browser_holds_an_empty_connection_open() {
+    let receiver = LoopbackReceiver::bind().await.unwrap();
+    let address = receiver
+        .redirect_uri()
+        .replace("http://localhost", "127.0.0.1");
+    let _preconnect = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let redirect = format!("http://{address}/?code=auth-code&state=s");
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = reqwest::get(redirect).await;
+    });
+
+    let query = receiver
+        .await_redirect(std::time::Duration::from_secs(2))
+        .await
+        .expect("the empty connection kept the redirect out");
+
+    assert_eq!(query.get("code").map(String::as_str), Some("auth-code"));
 }
 
 #[tokio::test]

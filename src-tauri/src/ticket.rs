@@ -1,6 +1,19 @@
-use serde::Deserialize;
+use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
 
 use crate::http::Http;
+
+const KEPT_TICKET: &str = "launch-ticket.json";
+const KEPT_FOR: Duration = Duration::from_secs(120);
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptTicket {
+    code: String,
+    kept_at: u64,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -20,11 +33,66 @@ pub fn ticket_code(uri: &str) -> Option<String> {
         .find(|(key, _)| key == "ticket")?
         .1
         .into_owned();
-    let valid = code.len() == 43
+    is_code(&code).then_some(code)
+}
+
+fn is_code(code: &str) -> bool {
+    code.len() == 43
         && code
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    valid.then_some(code)
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+// 업데이트로 다시 켜지면 링크로 받은 ticket 이 메모리와 함께 사라져 브라우저의 아무 계정으로 들어간다
+pub fn keep(home: &Path, code: &str) -> std::io::Result<()> {
+    keep_at(home, code, SystemTime::now())
+}
+
+fn keep_at(home: &Path, code: &str, now: SystemTime) -> std::io::Result<()> {
+    std::fs::create_dir_all(home)?;
+    let kept = KeptTicket {
+        code: code.into(),
+        kept_at: seconds(now),
+    };
+    std::fs::write(
+        home.join(KEPT_TICKET),
+        serde_json::to_vec(&kept).expect("a kept ticket always serializes"),
+    )
+}
+
+pub fn take_kept(home: &Path) -> Option<String> {
+    take_kept_at(home, SystemTime::now())
+}
+
+fn take_kept_at(home: &Path, now: SystemTime) -> Option<String> {
+    let text = std::fs::read(home.join(KEPT_TICKET)).ok()?;
+    forget(home);
+    let Ok(kept) = serde_json::from_slice::<KeptTicket>(&text) else {
+        log::warn!("Ignoring an unreadable launch ticket kept across a restart");
+        return None;
+    };
+    let fresh = seconds(now)
+        .checked_sub(kept.kept_at)
+        .is_some_and(|age| age <= KEPT_FOR.as_secs());
+    if !fresh {
+        log::info!("Ignoring a stale launch ticket kept across a restart");
+        return None;
+    }
+    is_code(&kept.code).then_some(kept.code)
+}
+
+pub fn forget(home: &Path) {
+    match std::fs::remove_file(home.join(KEPT_TICKET)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            log::warn!("Could not remove the kept launch ticket: {error}");
+        }
+        _ => {}
+    }
+}
+
+fn seconds(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 /// ticket 은 어느 계정으로 로그인할지 고르는 힌트일 뿐이라, 바꾸지 못해도 실행은 멈추지 않는다.
@@ -56,7 +124,9 @@ mod tests {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use super::{redeem, ticket_code};
+    use std::time::{Duration, SystemTime};
+
+    use super::{KEPT_FOR, keep_at, redeem, take_kept_at, ticket_code};
     use crate::http::Http;
 
     const CODE: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_6";
@@ -134,5 +204,27 @@ mod tests {
         );
         assert_eq!(ticket_code("hyperfarm://launch?ticket=../../x"), None);
         assert_eq!(ticket_code(&format!("https://launch?ticket={CODE}")), None);
+    }
+
+    #[test]
+    fn hands_a_kept_ticket_to_the_next_start_only_once() {
+        let home = tempfile::tempdir().unwrap();
+        let kept_at = SystemTime::now();
+        keep_at(home.path(), CODE, kept_at).unwrap();
+
+        let soon = kept_at + Duration::from_secs(5);
+        assert_eq!(take_kept_at(home.path(), soon).as_deref(), Some(CODE));
+        assert_eq!(take_kept_at(home.path(), soon), None);
+    }
+
+    #[test]
+    fn drops_a_ticket_kept_too_long_ago() {
+        let home = tempfile::tempdir().unwrap();
+        let kept_at = SystemTime::now();
+        keep_at(home.path(), CODE, kept_at).unwrap();
+
+        let late = kept_at + KEPT_FOR + Duration::from_secs(1);
+        assert_eq!(take_kept_at(home.path(), late), None);
+        assert_eq!(take_kept_at(home.path(), kept_at), None);
     }
 }
