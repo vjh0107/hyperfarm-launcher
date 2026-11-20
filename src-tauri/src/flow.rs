@@ -14,6 +14,7 @@ use crate::auth::{AuthError, Authenticator, MinecraftSession};
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
+use crate::install::options::{self, WorkArea};
 use crate::install::rules::Platform;
 use crate::install::{DownloadPlan, GameInstaller, GameLayout, InstallListener, pack};
 use crate::launch::{self, LaunchOptions};
@@ -68,6 +69,7 @@ pub enum LaunchEvent {
 }
 
 pub type Emitter = Arc<dyn Fn(LaunchEvent) + Send + Sync>;
+pub type WorkAreaProbe = Arc<dyn Fn() -> Option<WorkArea> + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +104,7 @@ pub struct LaunchFlow {
     settings: SettingsStore,
     total_memory_bytes: u64,
     emit: Emitter,
+    work_area: WorkAreaProbe,
     busy: Busy,
     cancel_sign_in: Notify,
     pending_code: Mutex<Option<String>>,
@@ -111,7 +114,12 @@ pub struct LaunchFlow {
 }
 
 impl LaunchFlow {
-    pub fn new(config: LauncherConfig, browser: BrowserOpener, emit: Emitter) -> Self {
+    pub fn new(
+        config: LauncherConfig,
+        browser: BrowserOpener,
+        emit: Emitter,
+        work_area: WorkAreaProbe,
+    ) -> Self {
         let http = Http::new();
         let microsoft = MicrosoftClient::new(
             http.clone(),
@@ -135,6 +143,7 @@ impl LaunchFlow {
             settings,
             total_memory_bytes: total_memory,
             emit,
+            work_area,
             busy: Busy::default(),
             cancel_sign_in: Notify::new(),
             pending_code: Mutex::new(None),
@@ -314,6 +323,7 @@ impl LaunchFlow {
                 },
             )
             .await?;
+        options::prepare(&layout.options(), &pack.default_options, (self.work_area)()).await;
 
         (self.emit)(LaunchEvent::Launching {
             server: installation.server.clone(),

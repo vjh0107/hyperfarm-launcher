@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::pack::PackFile;
 use super::*;
 
@@ -220,20 +218,6 @@ async fn finishes_pruning_when_it_cannot_write_the_record() {
         .unwrap();
 
     assert!(!mods.path().join(INSTALLED_MODS).exists());
-}
-
-#[tokio::test]
-async fn writes_default_options_only_once() {
-    let root = tempfile::tempdir().unwrap();
-    let options = root.path().join("options.txt");
-    let defaults = BTreeMap::from([("lang".to_string(), "ko_kr".to_string())]);
-
-    write_default_options(&defaults, &options).await.unwrap();
-    assert_eq!(std::fs::read_to_string(&options).unwrap(), "lang:ko_kr\n");
-
-    std::fs::write(&options, "lang:en_us\n").unwrap();
-    write_default_options(&defaults, &options).await.unwrap();
-    assert_eq!(std::fs::read_to_string(&options).unwrap(), "lang:en_us\n");
 }
 
 #[test]
