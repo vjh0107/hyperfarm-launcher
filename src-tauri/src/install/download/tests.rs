@@ -235,17 +235,17 @@ async fn waits_to_remove_a_file_that_is_held_for_a_moment() {
 }
 
 #[test]
-fn tells_the_player_when_another_program_holds_the_file() {
-    let error = |kind| io_error(Path::new("mods/hyperfarm.jar"))(std::io::Error::from(kind));
+fn blames_another_program_only_for_a_windows_file_that_stayed_held() {
+    let jar = Path::new("mods/hyperfarm.jar");
+    let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    let held = if cfg!(windows) { HELD } else { WRITE_FAILED };
 
+    assert_eq!(held_error(jar)(denied()).message, held);
     assert_eq!(
-        error(std::io::ErrorKind::PermissionDenied).message,
-        "백신 같은 다른 프로그램이 게임 파일을 막고 있어요. 잠시 뒤 다시 시도해 주세요."
+        held_error(jar)(std::io::Error::from(std::io::ErrorKind::NotFound)).message,
+        WRITE_FAILED
     );
-    assert_eq!(
-        error(std::io::ErrorKind::NotFound).message,
-        "게임 폴더에 파일을 쓰지 못했어요."
-    );
+    assert_eq!(io_error(jar)(denied()).message, WRITE_FAILED);
 }
 
 #[test]

@@ -243,7 +243,7 @@ async fn fetch(
             Ok(()) => {
                 move_into_place(&partial, &task.target)
                     .await
-                    .map_err(io_error(&task.target))?;
+                    .map_err(held_error(&task.target))?;
                 return Ok(());
             }
             Err(error) => {
@@ -417,17 +417,30 @@ fn available_on<'a>(path: &Path, disks: impl Iterator<Item = (&'a Path, u64)>) -
         .unwrap_or(u64::MAX)
 }
 
-// 같은 문구가 여러 자리에서 나오므로 로그에는 어느 파일이었는지를 함께 남긴다
+const WRITE_FAILED: &str = "게임 폴더에 파일을 쓰지 못했어요.";
+const HELD: &str = "백신 같은 다른 프로그램이 게임 파일을 막고 있어요. 잠시 뒤 다시 시도해 주세요.";
+
 pub fn io_error(path: &Path) -> impl FnOnce(std::io::Error) -> LauncherError + '_ {
+    move |error| file_error(path, &error, WRITE_FAILED)
+}
+
+// move_into_place·remove_when_free 가 끝까지 기다리고도 실패한 자리에만 쓴다. 폴더 만들기나 쓰기의 거절은 고른 폴더의
+// 권한 문제이고, macOS 는 열린 파일도 바꾸거나 지울 수 있어 그 거절도 언제나 권한 문제다
+pub fn held_error(path: &Path) -> impl FnOnce(std::io::Error) -> LauncherError + '_ {
     move |error| {
-        log::warn!("File system error at {}: {error}", path.display());
-        let message = if is_held(&error) {
-            "백신 같은 다른 프로그램이 게임 파일을 막고 있어요. 잠시 뒤 다시 시도해 주세요."
+        let message = if cfg!(windows) && is_held(&error) {
+            HELD
         } else {
-            "게임 폴더에 파일을 쓰지 못했어요."
+            WRITE_FAILED
         };
-        LauncherError::new(Problem::CorruptDownload, message)
+        file_error(path, &error, message)
     }
+}
+
+// 같은 문구가 여러 자리에서 나오므로 로그에는 어느 파일이었는지를 함께 남긴다
+fn file_error(path: &Path, error: &std::io::Error, message: &str) -> LauncherError {
+    log::warn!("File system error at {}: {error}", path.display());
+    LauncherError::new(Problem::CorruptDownload, message)
 }
 
 #[cfg(test)]

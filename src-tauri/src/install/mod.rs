@@ -13,7 +13,8 @@ use serde::Serialize;
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use download::{
-    DownloadTask, Downloader, Hash, Progress, io_error, move_into_place, remove_when_free,
+    DownloadTask, Downloader, Hash, Progress, held_error, io_error, move_into_place,
+    remove_when_free,
 };
 use metadata::{
     AssetIndex, AssetIndexRef, FabricProfile, RuntimeIndex, RuntimeManifest, VersionInfo,
@@ -555,7 +556,7 @@ pub async fn prune_mods(
                 .await
                 .is_ok_and(|metadata| metadata.is_file());
         if is_jar {
-            remove_when_free(&path).await.map_err(io_error(&path))?;
+            remove_when_free(&path).await.map_err(held_error(&path))?;
         }
     }
     let names: Vec<&str> = mods.iter().map(|file| file.file_name.as_str()).collect();
