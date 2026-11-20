@@ -68,6 +68,7 @@ jobs:
           installed=$(plutil -extract CFBundleShortVersionString raw "$plist")
           [ "$installed" = "$version" ] || { echo "::error::dmg has $installed but latest.json says $version"; exit 1; }
           plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$plist" | grep -qx hyperfarm
+          plutil -extract NSMicrophoneUsageDescription raw "$plist" >/dev/null
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q x86_64
           lipo -archs mnt/HyperFarm.app/Contents/MacOS/HyperFarm | grep -q arm64
           test -L mnt/Applications
