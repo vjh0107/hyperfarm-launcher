@@ -474,15 +474,22 @@ async fn fabric_profile(
             log::warn!("{url} sent an unreadable Fabric profile: {error}");
             LauncherError::network()
         })?;
-        if let Some(parent) = file.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(io_error)?;
+        // 사본은 메타 서버가 멎었을 때만 쓰므로, 백신이 파일을 쥐어 남기지 못해도 받은 것으로 켠다
+        if let Err(error) = save(file, &text).await {
+            log::warn!("Could not keep {}: {error}", file.display());
         }
-        let partial = file.with_extension("json.part");
-        tokio::fs::write(&partial, text).await.map_err(io_error)?;
-        move_into_place(&partial, file).await.map_err(io_error)?;
         Ok(profile)
     })
     .await
+}
+
+async fn save(file: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(parent) = file.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let partial = file.with_extension("json.part");
+    tokio::fs::write(&partial, text).await?;
+    move_into_place(&partial, file).await
 }
 
 // 메타 서버가 멎어도 지난번에 받아 둔 것으로 게임을 켠다
@@ -541,10 +548,16 @@ pub async fn prune_mods(
     }
     let names: Vec<&str> = mods.iter().map(|file| file.file_name.as_str()).collect();
     let json = serde_json::to_vec(&names).map_err(|error| io_error(error.into()))?;
-    tokio::fs::create_dir_all(directory)
-        .await
-        .map_err(io_error)?;
-    tokio::fs::write(record, json).await.map_err(io_error)
+    // 기록을 남기지 못하면 다음 실행이 지난 기록으로 지울 것을 고를 뿐이라 게임은 켠다
+    if let Err(error) = write_record(directory, &record, &json).await {
+        log::warn!("Could not keep {}: {error}", record.display());
+    }
+    Ok(())
+}
+
+async fn write_record(directory: &Path, record: &Path, json: &[u8]) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(directory).await?;
+    tokio::fs::write(record, json).await
 }
 
 async fn read_installed(record: &Path) -> Option<Vec<String>> {
