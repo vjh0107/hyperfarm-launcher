@@ -166,11 +166,13 @@ impl LaunchFlow {
         ticket::forget(&self.config.home);
     }
 
-    pub fn restore_kept_ticket(&self) {
-        if let Some(code) = ticket::take_kept(&self.config.home) {
-            log::info!("Restored the launch ticket kept across the update restart");
-            *self.pending_code.lock().unwrap() = Some(code);
-        }
+    pub fn restore_kept_ticket(&self) -> bool {
+        let Some(code) = ticket::take_kept(&self.config.home) else {
+            return false;
+        };
+        log::info!("Restored the launch ticket kept across the update restart");
+        *self.pending_code.lock().unwrap() = Some(code);
+        true
     }
 
     // 업데이트도 이 자리를 잡는다. 실행 도중 업데이트가 재시작하면 받던 게임 파일과 로그인이 끊긴다

@@ -9,6 +9,7 @@ mod settings;
 mod ticket;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -80,9 +81,31 @@ impl Game {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct Startup {
+    read_links: bool,
+    check_for_update: bool,
+}
+
+// 남겨 둔 ticket 이 있으면 업데이트가 방금 다시 띄운 기동이다. Windows 의 NSIS 는 다시 띄울 때 처음 받은 argv(옛
+// 링크)를 그대로 넘기므로 그것을 읽으면 남겨 둔 ticket 을 덮는다. 웹의 ticket 은 60초면 사라지는데 받기·설치·재기동에
+// 이미 그 시간을 썼으니, 방금 깐 판을 다시 확인하느라 더 쓰지 않는다
+fn startup(restored_ticket: bool) -> Startup {
+    Startup {
+        read_links: !restored_ticket,
+        check_for_update: !restored_ticket,
+    }
+}
+
+struct SkipUpdateCheck(AtomicBool);
+
 #[tauri::command]
-async fn begin(app: AppHandle, flow: State<'_, Flow>) -> Result<(), ()> {
-    if update(&app, &flow).await {
+async fn begin(
+    app: AppHandle,
+    flow: State<'_, Flow>,
+    skip: State<'_, SkipUpdateCheck>,
+) -> Result<(), ()> {
+    if !skip.0.swap(false, Ordering::Relaxed) && update(&app, &flow).await {
         return Ok(());
     }
     stay_while_playing(&app, flow.run(Step::Retry).await);
@@ -338,14 +361,17 @@ pub fn run() {
                 let _ = emitter.emit(LAUNCH_EVENT, event);
             });
             let flow = Arc::new(LaunchFlow::new(LauncherConfig::load(), browser, emit));
-            flow.restore_kept_ticket();
+            let startup = startup(flow.restore_kept_ticket());
             app.manage::<Flow>(flow);
+            app.manage(SkipUpdateCheck(AtomicBool::new(!startup.check_for_update)));
 
             #[cfg(any(windows, target_os = "linux"))]
             if let Err(error) = app.deep_link().register_all() {
                 log::warn!("Could not register the hyperfarm:// scheme: {error}");
             }
-            if let Ok(Some(urls)) = app.deep_link().get_current() {
+            if startup.read_links
+                && let Ok(Some(urls)) = app.deep_link().get_current()
+            {
                 accept_links(&handle, urls.into_iter().map(String::from));
             }
             let linked = handle.clone();
@@ -403,7 +429,7 @@ pub fn run() {
 mod tests {
     use std::time::Duration;
 
-    use super::{Game, release_summary};
+    use super::{Game, Startup, release_summary, startup};
 
     fn sleeping_process() -> tokio::process::Child {
         #[cfg(windows)]
@@ -442,6 +468,24 @@ mod tests {
         })
         .await
         .expect("the killed game still counts as running");
+    }
+
+    #[test]
+    fn keeps_the_ticket_an_update_restart_carried_and_does_not_check_again() {
+        assert_eq!(
+            startup(true),
+            Startup {
+                read_links: false,
+                check_for_update: false,
+            }
+        );
+        assert_eq!(
+            startup(false),
+            Startup {
+                read_links: true,
+                check_for_update: true,
+            }
+        );
     }
 
     #[test]
