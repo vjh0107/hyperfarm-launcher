@@ -11,7 +11,8 @@
     {"slug": "ferrite-core"},
     {"slug": "immediatelyfast"},
     {"slug": "entityculling"},
-    {"slug": "dynamic-fps"}
+    {"slug": "dynamic-fps"},
+    {"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.0.jar"}
   ],
   "shaderpacks": [
     {"slug": "bsl-shaders"},

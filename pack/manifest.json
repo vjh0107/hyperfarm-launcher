@@ -59,6 +59,13 @@
       "url": "https://cdn.modrinth.com/data/LQ3K71Q1/versions/Jwq069rR/dynamic-fps-3.11.10%2Bminecraft-26.3.0-fabric.jar",
       "sha512": "7976d11411babfa3ac0c38898f26ee6192f22a4f595b637eeae3cc5185f326c0e4b9fd7d00b3d7e8d020dd861295f0df52f9a9d7c67e88946d0ba9fff4a9f894",
       "size": 189474
+    },
+    {
+      "id": "hyperfarm",
+      "fileName": "hyperfarm-0.1.0.jar",
+      "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.0.jar",
+      "sha512": "4b4547f18f113fc4a1b14a73dca63f0aa88a0a253dcfddfc1d69433bfaea01a1d3e69d3fd81f12521bf114e1bb8834f970bf22ff7a64f4e82caf91c14fabd81b",
+      "size": 35050781
     }
   ],
   "shaderpacks": [
