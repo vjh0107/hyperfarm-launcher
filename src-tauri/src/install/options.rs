@@ -6,8 +6,9 @@ use super::download::move_into_place;
 // hyperfarm 의 Vellum 화면이 스크롤도 잘림도 없이 들어가는 GUI 좌표 크기다
 const VELLUM_WIDTH: u32 = 629;
 const VELLUM_HEIGHT: u32 = 452;
-// macOS(28pt)·Windows(약 31px)의 제목 표시줄보다 넉넉히 잡는다. 모자라면 한 칸 큰 배율을 골라 최대화해도 Vellum 이 잘린다
-const TITLE_BAR: f64 = 40.0;
+// macOS(28pt)·Windows 100%(31~32px)의 제목 표시줄을 덮는 가장 작은 값이다. 모자라면 한 칸 큰 배율을 골라 최대화해도
+// Vellum 이 잘리고, 늘리면 QHD(작업 영역 높이 1392)가 3 에서 2 로 떨어진다
+const TITLE_BAR: f64 = 32.0;
 // 26.3 의 data version. 없으면 게임이 0 판 파일로 읽어 data fixer 를 처음부터 모두 돌린다
 const DATA_VERSION: u32 = 5023;
 const GUI_SCALE: &str = "guiScale";

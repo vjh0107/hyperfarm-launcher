@@ -31,7 +31,7 @@ fn picks_the_largest_scale_that_fits_vellum_in_a_maximized_window() {
         ("FHD, Windows 100%", area(1920, 1032, 1.0), 2),
         ("FHD, Windows 125%", area(1920, 1020, 1.25), 2),
         ("FHD 16:10", area(1920, 1152, 1.0), 2),
-        ("QHD, Windows 100%", area(2560, 1392, 1.0), 2),
+        ("QHD, Windows 100%", area(2560, 1392, 1.0), 3),
         ("4K, Windows 100%", area(3840, 2112, 1.0), 4),
         ("4K, Windows 150%", area(3840, 2088, 1.5), 4),
         ("1366x768", area(1366, 728, 1.0), 1),
@@ -47,8 +47,8 @@ fn picks_the_largest_scale_that_fits_vellum_in_a_maximized_window() {
 
 #[test]
 fn needs_every_vellum_row_and_column_after_rounding_up() {
-    assert_eq!(gui_scale(area(1920, 943, 1.0)), 2);
-    assert_eq!(gui_scale(area(1920, 942, 1.0)), 1);
+    assert_eq!(gui_scale(area(1920, 935, 1.0)), 2);
+    assert_eq!(gui_scale(area(1920, 934, 1.0)), 1);
     assert_eq!(gui_scale(area(1257, 1080, 1.0)), 2);
     assert_eq!(gui_scale(area(1256, 1080, 1.0)), 1);
 }
