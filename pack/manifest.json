@@ -20,10 +20,10 @@
     },
     {
       "id": "iris",
-      "fileName": "iris-fabric-1.11.7+mc26.3.jar",
-      "url": "https://cdn.modrinth.com/data/YL57xq9U/versions/vTN4NRGW/iris-fabric-1.11.7%2Bmc26.3.jar",
-      "sha512": "d8d3312f77fc52a48e4a6cd836fda33669bdebcb4de0b8c0d30adc808b287330a533e0baef355cc1ce6336a26851d9775369a802a4666b7b7a6266af20088f42",
-      "size": 2850938
+      "fileName": "iris-fabric-1.11.7-hyperfarm.1-mc26.3.jar",
+      "url": "https://pack.hyperf.kr/launcher/mods/iris-fabric-1.11.7-hyperfarm.1-mc26.3.jar",
+      "sha512": "2095197dcd4e54aa606ed78106f9d05de8d4acd788786051d7743bd13e614fc15634287181f26d49826593246fbbf1e4b743e182179ff1b63106710946cad33e",
+      "size": 2883170
     },
     {
       "id": "lithium",
