@@ -121,10 +121,18 @@ cd src-tauri && HYPERFARM_TEST_LIVE_HOME=/tmp/hyperfarm-live cargo test installs
 `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`. 이 환경은 main 과 `v*` 태그에서만 열린다.
 
 macOS 앱은 `HyperFarm Launcher` 자체 서명 인증서로 서명하고 notarization 은 하지 않는다. 서명이 하는 일은 TCC 가
-마이크 허용을 그 인증서에 묶어 기억하게 하는 것뿐이라 Gatekeeper 경고는 그대로다. 처음 열 때 Finder 에서 앱을
-우클릭해 "열기" 를 누르거나, 시스템 설정의 개인정보 보호 및 보안에서 "그래도 열기" 를 누른다. **인증서를 바꾸면
+마이크 허용을 그 인증서에 묶어 기억하게 하는 것뿐이라 Gatekeeper 는 이 앱을 확인된 개발자의 것으로 보지 않는다.
+브라우저로 받은 dmg 의 앱에는 quarantine 표시가 붙어, macOS 판에 따라 "확인할 수 없음" 이나 "손상되었기 때문에 열 수
+없습니다" 가 뜬다. 앞의 것은 시스템 설정의 개인정보 보호 및 보안에서 "그래도 열기" 로 열고(macOS 15 부터는 우클릭
+"열기" 로는 넘어가지 않는다), 뒤의 것은 그 단추도 없으므로 응용 프로그램 폴더로 옮긴 뒤 터미널에서
+`xattr -dr com.apple.quarantine /Applications/HyperFarm.app` 을 한 번 돌린다. 설치한 뒤 updater 가 받는 판에는 이
+표시가 붙지 않는다. 경고를 없애려면 Apple Developer ID 인증서와 notarization 이 있어야 한다. **인증서를 바꾸면
 모든 플레이어가 마이크 권한을 다시 받는다** — 바꿀 때는 `smoke.yml` 의 `SIGNING_CERTIFICATE_SHA1` 도 함께 바꾼다.
-Windows 코드 서명은 아직 없어 처음 설치할 때 SmartScreen 경고가 뜬다.
+
+Windows 코드 서명은 아직 없다. SmartScreen 은 "추가 정보" → "실행" 으로 넘어가지만, 스마트 앱 컨트롤이 켜진 PC 는
+서명되지 않은 실행 파일을 넘길 길 없이 막는다. 그 PC 에서 쓰려면 Windows 보안의 앱 및 브라우저 컨트롤에서 스마트
+앱 컨트롤을 꺼야 하고, Windows 판에 따라 한 번 끄면 Windows 를 초기화하기 전에는 다시 켜지 않는다. 신뢰받는 CA 의 코드
+서명 인증서로 서명해야 풀린다.
 
 ## Privacy
 
