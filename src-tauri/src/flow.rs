@@ -230,7 +230,8 @@ impl LaunchFlow {
             return None;
         };
         let mut game = None;
-        let event = match self.advance(step).await {
+        let sign_outs = self.sign_outs.load(Ordering::SeqCst);
+        let event = match self.advance(step, sign_outs).await {
             Ok(Outcome::Ready(server)) => LaunchEvent::Ready { server },
             Ok(Outcome::Started(child)) => {
                 game = Some(child);
@@ -244,14 +245,22 @@ impl LaunchFlow {
                     .player_name(&web_player_id)
                     .await
                     .unwrap_or_else(|| "웹 계정".into());
-                let event = LaunchEvent::Mismatch {
-                    web_player_id,
-                    web_name,
-                    session_player_id: session.player_id.clone(),
-                    session_name: session.name.clone(),
-                };
-                *self.mismatched.lock().unwrap() = Some(session);
-                event
+                // 이름을 묻는 사이 로그아웃했으면 불일치 세션을 두지 않는다. 두면 "이 계정으로 시작" 이 로그아웃한 계정으로 켠다
+                if self.signed_out_since(sign_outs) {
+                    log::info!("Signed out during the account mismatch; dropping its session");
+                    LaunchEvent::Failed {
+                        error: LauncherError::new(Problem::LoginCancelled, SIGNED_OUT),
+                    }
+                } else {
+                    let event = LaunchEvent::Mismatch {
+                        web_player_id,
+                        web_name,
+                        session_player_id: session.player_id.clone(),
+                        session_name: session.name.clone(),
+                    };
+                    *self.mismatched.lock().unwrap() = Some(session);
+                    event
+                }
             }
             Err(AuthError::Failed(error)) => {
                 log::warn!("Launch stopped with {:?}: {}", error.problem, error.message);
@@ -302,8 +311,7 @@ impl LaunchFlow {
         self.settings.game_directory(&self.config.home)
     }
 
-    async fn advance(&self, step: Step) -> Result<Outcome, AuthError> {
-        let sign_outs = self.sign_outs.load(Ordering::SeqCst);
+    async fn advance(&self, step: Step, sign_outs: u64) -> Result<Outcome, AuthError> {
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
             Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {
