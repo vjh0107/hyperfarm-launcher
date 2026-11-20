@@ -19,6 +19,7 @@
     {"slug": "lux-v1", "version": "1.3"}
   ],
   "defaultOptions": {
-    "lang": "ko_kr"
+    "lang": "ko_kr",
+    "onboardAccessibility": "false"
   }
 }
