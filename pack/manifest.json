@@ -2,7 +2,6 @@
   "minecraftVersion": "26.3",
   "fabricLoaderVersion": "0.20.1",
   "server": "hyperf.kr",
-  "serverResourcePack": "https://pack-prod.hyperf.kr/resource_pack.zip",
   "mods": [
     {
       "id": "fabric-api",
