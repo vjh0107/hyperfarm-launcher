@@ -12,7 +12,7 @@
     {"slug": "ferrite-core"},
     {"slug": "immediatelyfast"},
     {"slug": "entityculling"},
-    {"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.12.jar"}
+    {"id": "hyperfarm", "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.13.jar"}
   ],
   "shaderpacks": [
     {"slug": "bsl-shaders"},
