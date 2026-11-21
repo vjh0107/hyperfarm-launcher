@@ -11,7 +11,10 @@ use crate::auth::microsoft::{BrowserOpener, MicrosoftClient, MicrosoftEndpoints}
 use crate::auth::store::KeyringAccountStore;
 use crate::auth::xbox::{XboxClient, XboxEndpoints};
 use crate::auth::{AuthError, Authenticator, MinecraftSession};
-use crate::crash::{Crash, CrashReporter, LaunchContext};
+use crate::crash::{
+    Crash, CrashReport, CrashReporter, Filed, LaunchContext, ReportError, ReportProblem,
+    SupportEndpoints, crashed_player_session,
+};
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
@@ -99,12 +102,20 @@ impl Step {
 
 struct Prepared {
     session: MinecraftSession,
+    minecraft_version: String,
     installation: Installation,
     layout: GameLayout,
     default_options: BTreeMap<String, String>,
     crash_report_dsn: Option<String>,
     hyperfarm_mod: Option<String>,
     at: Instant,
+}
+
+// 크래시 문의는 크래시를 낸 실행의 계정과 판으로 보낸다. 화면이 뜬 뒤 다시 로그인해도 바뀌지 않게 켤 때 잡아 둔다
+#[derive(Clone)]
+struct Launched {
+    player_id: String,
+    minecraft_version: String,
 }
 
 enum Outcome {
@@ -146,6 +157,8 @@ pub struct LaunchFlow {
     prepared: Mutex<Option<Prepared>>,
     crash: Mutex<Option<Crash>>,
     crash_reports: CrashReporter,
+    launched: Mutex<Option<Launched>>,
+    support: SupportEndpoints,
     sign_outs: AtomicU64,
     sign_in_url: Arc<Mutex<Option<String>>>,
 }
@@ -173,6 +186,7 @@ impl LaunchFlow {
         .map_or(0, |system| system.total_memory());
         let settings = SettingsStore::new(config.home.join("launcher.json"), total_memory);
         Self {
+            support: SupportEndpoints::new(&config.web_base),
             config,
             platform: Platform::current(),
             crash_reports: CrashReporter::new(http.clone()),
@@ -189,6 +203,7 @@ impl LaunchFlow {
             mismatched: Mutex::new(None),
             prepared: Mutex::new(None),
             crash: Mutex::new(None),
+            launched: Mutex::new(None),
             sign_outs: AtomicU64::new(0),
             sign_in_url: Arc::new(Mutex::new(None)),
         }
@@ -330,6 +345,22 @@ impl LaunchFlow {
             .report(crash, self.settings.load().send_crash_reports);
     }
 
+    pub async fn file_crash_report(&self, note: Option<&str>) -> Result<Filed, ReportError> {
+        let crash = self.crash();
+        let launched = self.launched.lock().unwrap().clone();
+        let (Some(crash), Some(launched)) = (crash, launched) else {
+            return Err(ReportError::new(ReportProblem::NoCrash));
+        };
+        let report = CrashReport::new(&crash, &launched.minecraft_version, note);
+        crate::crash::file(&self.http, &self.support, &report, || async {
+            crashed_player_session(
+                self.authenticator.refreshed_session().await,
+                &launched.player_id,
+            )
+        })
+        .await
+    }
+
     pub fn is_sending_crash_reports(&self) -> bool {
         self.crash_reports.is_sending()
     }
@@ -458,6 +489,7 @@ impl LaunchFlow {
             installation,
             layout,
             hyperfarm_mod: pack.hyperfarm_mod_version().map(str::to_string),
+            minecraft_version: pack.minecraft_version,
             crash_report_dsn: pack.crash_report_dsn,
             default_options: pack.default_options,
             at: Instant::now(),
@@ -473,6 +505,7 @@ impl LaunchFlow {
             default_options,
             crash_report_dsn,
             hyperfarm_mod,
+            minecraft_version,
             ..
         } = prepared;
         let display_adapters = options::display_adapter_vendors().await;
@@ -493,6 +526,11 @@ impl LaunchFlow {
                 session.player_id.clone(),
                 session.xuid.clone(),
             ],
+        });
+
+        *self.launched.lock().unwrap() = Some(Launched {
+            player_id: session.player_id.clone(),
+            minecraft_version,
         });
 
         (self.emit)(LaunchEvent::Launching {

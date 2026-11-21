@@ -78,6 +78,10 @@ impl Authenticator {
         self.accounts.delete();
     }
 
+    pub async fn refreshed_session(&self) -> Result<Option<MinecraftSession>, LauncherError> {
+        self.stored_session(None).await
+    }
+
     async fn stored_session(
         &self,
         ticket: Option<&LaunchTicket>,
@@ -185,7 +189,7 @@ fn checked(
     }
 }
 
-fn same_player(left: &str, right: &str) -> bool {
+pub fn same_player(left: &str, right: &str) -> bool {
     left.replace('-', "")
         .eq_ignore_ascii_case(&right.replace('-', ""))
 }

@@ -1,12 +1,14 @@
 import heroUrl from "./assets/images/bg.webp";
 import logoUrl from "./assets/images/logo.webp";
 import { h, icon, Icons } from "./dom";
-import type { Crash } from "./events";
+import type { Crash, CrashReportFiled } from "./events";
 import { gigabytes } from "./format";
 
 const SETTINGS_HEIGHT = 440;
 const CRASH_REPORT_HEIGHT = 344;
+const CRASH_NOTE_HEIGHT = 344;
 const COPY_FEEDBACK_MS = 2000;
+const NOTE_LIMIT = 500;
 
 export interface Chrome {
   minimize(): void;
@@ -220,6 +222,8 @@ export interface CrashActions {
   openLogs(): void;
   openReport(): void;
   copy(): Promise<void>;
+  report(note: string | null): Promise<CrashReportFiled>;
+  resize(): void;
   close(): void;
   restart(): void;
 }
@@ -234,13 +238,7 @@ export function crashScreen(chrome: Chrome, crash: Crash, on: CrashActions): HTM
       ? [h("span", { class: "row-name" }, "알 수 없음")]
       : [h("span", { class: "row-name" }, String(crash.code)), crash.hex && h("span", { class: "caption" }, crash.hex)];
   const rows = h("div", { class: "rows" }, infoRow("코드", ...code), crash.report && infoRow("보고서", h("span", { class: "row-name" }, crash.report)));
-  const opens = h(
-    "div",
-    { class: "text-actions" },
-    pill("로그 폴더 열기", "secondary small", on.openLogs),
-    crash.report && pill("크래시 보고서 열기", "secondary small", on.openReport),
-  );
-  const copy = pill("정보 복사", "ghost aside", () => {
+  const copy = pill("정보 복사", "secondary small", () => {
     void on.copy().then(
       () => feedback("복사했어요"),
       () => feedback("복사하지 못했어요"),
@@ -250,17 +248,80 @@ export function crashScreen(chrome: Chrome, crash: Crash, on: CrashActions): HTM
     copy.textContent = label;
     window.setTimeout(() => (copy.textContent = "정보 복사"), COPY_FEEDBACK_MS);
   };
+  const opens = h(
+    "div",
+    { class: "text-actions" },
+    pill("로그 폴더 열기", "secondary small", on.openLogs),
+    crash.report && pill("크래시 보고서 열기", "secondary small", on.openReport),
+    copy,
+  );
+
+  const note = h("textarea", { class: "note", maxlength: String(NOTE_LIMIT), placeholder: "메모 (선택)", spellcheck: "false" });
+  const failure = h("p", { class: "caption failure" });
+  const compose = h("div", { class: "compose" }, note, failure);
+  const report = pill("보고하기", "ghost aside", () => composing(true));
+  const cancel = pill("취소", "ghost aside", () => composing(false));
+  const send = pill("보내기", "primary", () => void submit());
+  const idle = [report, pill("닫기", "secondary", on.close), pill("다시 시작", "primary", on.restart)];
+
+  const idleHeight = crash.report ? String(CRASH_REPORT_HEIGHT) : undefined;
+  const composing = (open: boolean) => {
+    const height = open ? String(CRASH_NOTE_HEIGHT) : idleHeight;
+    if (height !== screen.dataset.height) {
+      if (height) screen.dataset.height = height;
+      else delete screen.dataset.height;
+      on.resize();
+    }
+    rows.hidden = open;
+    opens.hidden = open;
+    compose.hidden = !open;
+    for (const button of idle) button.hidden = open;
+    cancel.hidden = !open;
+    send.hidden = !open;
+    if (open) note.focus();
+    else failure.textContent = "";
+  };
+  const sending = (busy: boolean) => {
+    note.disabled = busy;
+    cancel.disabled = busy;
+    send.disabled = busy;
+    send.replaceChildren(...(busy ? [icon(Icons.spinner, 15, 2.4, "spinner"), "보내는 중"] : ["보내기"]));
+  };
+  const submit = async () => {
+    failure.textContent = "";
+    sending(true);
+    try {
+      const filed = await on.report(note.value.trim() || null);
+      report.textContent = filed.outcome === "REPLAYED" ? "이미 보고했어요" : "보고했어요";
+      report.disabled = true;
+      composing(false);
+    } catch (error) {
+      failure.textContent = reportFailure(error);
+    } finally {
+      sending(false);
+    }
+  };
+
   const screen = frame(
     chrome,
     true,
     errorBadge(),
     null,
-    h("div", { class: "text" }, h("h1", { class: "title" }, "게임이 꺼졌어요"), rows, opens),
+    h("div", { class: "text" }, h("h1", { class: "title" }, "게임이 꺼졌어요"), rows, opens, compose),
     spacer(),
-    actions(copy, pill("닫기", "secondary", on.close), pill("다시 시작", "primary", on.restart)),
+    actions(...idle, cancel, send),
   );
-  if (crash.report) screen.dataset.height = String(CRASH_REPORT_HEIGHT);
+  if (idleHeight) screen.dataset.height = idleHeight;
+  cancel.hidden = true;
+  send.hidden = true;
+  compose.hidden = true;
   return screen;
+}
+
+// 명령이 없는 옛 판이나 화면이 모르는 거절도 문구 하나로 끝낸다. 비워 두면 보내기를 눌러도 아무 일이 없는 것처럼 보인다
+function reportFailure(error: unknown): string {
+  if (typeof error === "object" && error !== null && "problem" in error && "message" in error && typeof error.message === "string") return error.message;
+  return "보고하지 못했어요.";
 }
 
 export function accountRows(webBase: string, rows: { label: string; playerId: string; name: string }[]): HTMLElement {
