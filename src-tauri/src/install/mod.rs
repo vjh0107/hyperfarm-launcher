@@ -1,4 +1,6 @@
 pub mod download;
+#[cfg(target_os = "macos")]
+mod game_app;
 pub mod library;
 pub mod metadata;
 pub mod options;
@@ -53,8 +55,12 @@ impl GameLayout {
         self.root.join("assets")
     }
 
+    fn runtimes(&self) -> PathBuf {
+        self.root.join("runtime")
+    }
+
     fn runtime(&self, component: &str) -> PathBuf {
-        self.root.join("runtime").join(component)
+        self.runtimes().join(component)
     }
 
     pub fn mods(&self) -> PathBuf {
@@ -245,6 +251,8 @@ impl GameInstaller {
                 "게임용 Java 를 설치하지 못했어요.",
             ));
         }
+        #[cfg(target_os = "macos")]
+        let java = game_app::wrap(&self.layout.runtimes(), &java).await?;
         let natives = self.layout.version(&version.id).join("natives");
         for sub in ["java", "jna", "lwjgl", "netty"] {
             let directory = natives.join(sub);
