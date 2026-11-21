@@ -1,7 +1,12 @@
 import heroUrl from "./assets/images/bg.webp";
 import logoUrl from "./assets/images/logo.webp";
 import { h, icon, Icons } from "./dom";
+import type { Crash } from "./events";
 import { gigabytes } from "./format";
+
+const SETTINGS_HEIGHT = 440;
+const CRASH_REPORT_HEIGHT = 344;
+const COPY_FEEDBACK_MS = 2000;
 
 export interface Chrome {
   minimize(): void;
@@ -203,11 +208,59 @@ export interface ErrorContent {
   primary: Action;
 }
 
+const errorBadge = () => h("div", { class: "error-badge" }, icon(Icons.alert, 28, 2.4));
+
 export function errorScreen(chrome: Chrome, content: ErrorContent): HTMLElement {
   const text = h("div", { class: "text" }, h("h1", { class: "title" }, content.title), content.rows ?? h("p", { class: "body" }, content.body ?? ""));
-  const badge = h("div", { class: "error-badge" }, icon(Icons.alert, 28, 2.4));
   const buttons = [content.secondary && pill(content.secondary.label, "secondary", content.secondary.run), pill(content.primary.label, "primary", content.primary.run)];
-  return frame(chrome, true, badge, null, text, spacer(), actions(...buttons.filter((button): button is HTMLButtonElement => Boolean(button))));
+  return frame(chrome, true, errorBadge(), null, text, spacer(), actions(...buttons.filter((button): button is HTMLButtonElement => Boolean(button))));
+}
+
+export interface CrashActions {
+  openLogs(): void;
+  openReport(): void;
+  copy(): Promise<void>;
+  close(): void;
+  restart(): void;
+}
+
+function infoRow(label: string, ...values: (Node | string | null)[]): HTMLElement {
+  return h("div", { class: "row" }, h("span", { class: "row-label" }, label), ...values);
+}
+
+export function crashScreen(chrome: Chrome, crash: Crash, on: CrashActions): HTMLElement {
+  const code =
+    crash.code === null
+      ? [h("span", { class: "row-name" }, "알 수 없음")]
+      : [h("span", { class: "row-name" }, String(crash.code)), crash.hex && h("span", { class: "caption" }, crash.hex)];
+  const rows = h("div", { class: "rows" }, infoRow("코드", ...code), crash.report && infoRow("보고서", h("span", { class: "row-name" }, crash.report)));
+  const opens = h(
+    "div",
+    { class: "text-actions" },
+    pill("로그 폴더 열기", "secondary small", on.openLogs),
+    crash.report && pill("크래시 보고서 열기", "secondary small", on.openReport),
+  );
+  const copy = pill("정보 복사", "ghost aside", () => {
+    void on.copy().then(
+      () => feedback("복사했어요"),
+      () => feedback("복사하지 못했어요"),
+    );
+  });
+  const feedback = (label: string) => {
+    copy.textContent = label;
+    window.setTimeout(() => (copy.textContent = "정보 복사"), COPY_FEEDBACK_MS);
+  };
+  const screen = frame(
+    chrome,
+    true,
+    errorBadge(),
+    null,
+    h("div", { class: "text" }, h("h1", { class: "title" }, "게임이 꺼졌어요"), rows, opens),
+    spacer(),
+    actions(copy, pill("닫기", "secondary", on.close), pill("다시 시작", "primary", on.restart)),
+  );
+  if (crash.report) screen.dataset.height = String(CRASH_REPORT_HEIGHT);
+  return screen;
 }
 
 export function accountRows(webBase: string, rows: { label: string; playerId: string; name: string }[]): HTMLElement {
@@ -286,7 +339,7 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
 
   return h(
     "section",
-    { class: "screen settings" },
+    { class: "screen settings", "data-height": String(SETTINGS_HEIGHT) },
     header,
     h("div", { class: "settings-body" }, memory, places, spacer(), h("p", { class: "caption settings-footer" }, model.footer)),
   );
