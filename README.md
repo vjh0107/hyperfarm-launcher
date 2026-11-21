@@ -149,13 +149,21 @@ Windows 코드 서명은 아직 없다. SmartScreen 은 "추가 정보" → "실
 ## Privacy
 
 This program does not send any information to other networked systems except what is needed to sign the player in and
-start the game they asked to play, and a summary of each game crash unless the player turns that off:
+start the game they asked to play, a summary of each game crash unless the player turns that off, and a crash report the
+player chooses to send:
 
 - **Microsoft, Xbox Live and Minecraft services** receive the player's sign-in to obtain a Minecraft session, as every
   Minecraft launcher does. The Microsoft refresh token is stored only in the operating system's credential store on the
   player's computer.
 - **hyperf.kr** receives the one-time launch ticket from the website's "Start game" button, to learn which account the
   player signed in with on the website, and serves the player's skin head shown in the launcher window.
+- **hyperf.kr and Mojang's session server** receive a crash report only when the player presses 보고하기 on the crash
+  screen. To prove which account it comes from, the launcher asks hyperf.kr for a one-time code with the player's
+  Minecraft name and hands that code with the player's Minecraft session to `sessionserver.mojang.com`, the same way
+  the game joins a server. hyperf.kr then receives the name, the code and the report: the crash's random id, the
+  launcher and Minecraft versions, the operating system, the exit code, the crash report's file name and summary lines
+  with home folders removed, and the note the player typed. It becomes a support ticket that HyperFarm staff answer.
+  The Minecraft session is sent only to Mojang.
 - **Mojang, Fabric, Modrinth and pack.hyperf.kr** serve the game, mod and update files. The launcher downloads them
   without sending account data.
 - **Discord**, if it is running on the player's computer, is told over its local connection that the player is playing,
