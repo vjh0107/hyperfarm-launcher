@@ -107,7 +107,7 @@ struct Prepared {
 
 enum Outcome {
     Ready(String),
-    Started(GameProcess),
+    Started(Box<GameProcess>),
 }
 
 #[derive(Default)]
@@ -236,8 +236,8 @@ impl LaunchFlow {
         let sign_outs = self.sign_outs.load(Ordering::SeqCst);
         let event = match self.advance(step, sign_outs).await {
             Ok(Outcome::Ready(server)) => LaunchEvent::Ready { server },
-            Ok(Outcome::Started(child)) => {
-                game = Some(child);
+            Ok(Outcome::Started(process)) => {
+                game = Some(*process);
                 LaunchEvent::Launched
             }
             Err(AuthError::Mismatch {
@@ -362,7 +362,9 @@ impl LaunchFlow {
             *self.prepared.lock().unwrap() = Some(prepared);
             return Ok(Outcome::Ready(server));
         }
-        self.start(prepared).await.map(Outcome::Started)
+        self.start(prepared)
+            .await
+            .map(|process| Outcome::Started(Box::new(process)))
     }
 
     fn signed_out_since(&self, sign_outs: u64) -> bool {

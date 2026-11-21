@@ -96,8 +96,18 @@ impl Game {
         false
     }
 
-    fn take_crash(&self) -> Option<Crash> {
-        self.crash.lock().unwrap().take()
+    // 창이 없어도 런처가 남아 있어야 하는 동안이다. is_running 이 꺼진 게임을 거두며 크래시를 남기므로 그것을 먼저
+    // 물어야 한다. 크래시를 먼저 보면 그 사이 거둔 크래시를 놓치고 런처가 화면 없이 끝난다
+    fn keeps_launcher_open(&self) -> bool {
+        self.is_running() || self.crash.lock().unwrap().is_some()
+    }
+
+    fn crash(&self) -> Option<Crash> {
+        self.crash.lock().unwrap().clone()
+    }
+
+    fn forget_crash(&self) {
+        self.crash.lock().unwrap().take();
     }
 }
 
@@ -160,14 +170,15 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
             check.tick().await;
         }
         presence.abort();
-        match app.state::<Game>().take_crash() {
+        match app.state::<Game>().crash() {
             Some(crash) => show_crash(&app, crash),
             None => app.exit(0),
         }
     });
 }
 
-// 창을 다시 만들면 화면은 처음부터 다시 읽히므로, 이벤트가 아니라 화면이 뜨면서 묻는 crash 명령으로 넘긴다
+// 창을 다시 만들면 화면은 처음부터 다시 읽히므로, 이벤트가 아니라 화면이 뜨면서 묻는 crash 명령으로 넘긴다.
+// Game 의 크래시는 창을 띄운 뒤에 비운다. 그 전에 비우면 창이 없는 사이의 종료 요청이 런처를 끝낸다
 fn show_crash(app: &AppHandle, crash: Crash) {
     app.state::<Flow>().record_crash(crash);
     #[cfg(target_os = "macos")]
@@ -183,6 +194,7 @@ fn show_crash(app: &AppHandle, crash: Crash) {
         .expect("tauri.conf.json declares the main window");
     match WebviewWindowBuilder::from_config(app, config).and_then(|builder| builder.build()) {
         Ok(window) => {
+            app.state::<Game>().forget_crash();
             if let Err(error) = window.set_focus() {
                 log::warn!("Could not focus the crash window: {error}");
             }
@@ -492,9 +504,10 @@ pub fn run() {
             }
             let linked = handle.clone();
             app.deep_link().on_open_url(move |event| {
-                // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다
-                if linked.state::<Game>().is_running() {
-                    log::info!("Ignoring a launch link while the game is running");
+                // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다. 크래시 화면을 띄우는 사이에 받으면 그 실행이
+                // 크래시를 지워 새 창이 크래시 대신 빈 화면을 그린다
+                if linked.state::<Game>().keeps_launcher_open() {
+                    log::info!("Ignoring a launch link while the game is running or its crash is not shown yet");
                     return;
                 }
                 if !accept_links(&linked, event.urls().into_iter().map(String::from)) {
@@ -538,7 +551,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = event
-                && app.state::<Game>().is_running()
+                && app.state::<Game>().keeps_launcher_open()
             {
                 api.prevent_exit();
             }
@@ -602,8 +615,7 @@ mod tests {
             .start_kill()
             .unwrap();
         wait_until_stopped(&game).await;
-        let crash =
-            serde_json::to_value(game.take_crash().expect("a killed game is a crash")).unwrap();
+        let crash = serde_json::to_value(game.crash().expect("a killed game is a crash")).unwrap();
         if cfg!(unix) {
             assert!(crash["code"].is_null());
         }
@@ -616,14 +628,32 @@ mod tests {
 
         game.start(process(directory.path(), "exit 0"));
         wait_until_stopped(&game).await;
-        assert!(game.take_crash().is_none());
+        assert!(game.crash().is_none());
 
         game.start(process(directory.path(), "exit 3"));
         wait_until_stopped(&game).await;
         assert!(!game.is_running());
-        let crash = serde_json::to_value(game.take_crash().expect("exit 3 is a crash")).unwrap();
+        let crash = serde_json::to_value(game.crash().expect("exit 3 is a crash")).unwrap();
         assert_eq!(crash["code"], 3);
-        assert!(game.take_crash().is_none());
+    }
+
+    #[tokio::test]
+    async fn keeps_the_launcher_open_until_a_crash_nobody_reaped_yet_is_shown() {
+        let directory = tempfile::tempdir().unwrap();
+        let game = Game::default();
+        game.start(process(directory.path(), "exit 3"));
+        let mut exited = game.process.lock().unwrap().take().unwrap();
+        exited.child.wait().await.unwrap();
+        game.start(exited);
+
+        assert!(game.keeps_launcher_open());
+        assert!(game.keeps_launcher_open());
+        game.forget_crash();
+        assert!(!game.keeps_launcher_open());
+
+        game.start(process(directory.path(), "exit 0"));
+        wait_until_stopped(&game).await;
+        assert!(!game.keeps_launcher_open());
     }
 
     #[test]
