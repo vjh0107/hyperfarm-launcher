@@ -3,6 +3,7 @@
   "fabricLoaderVersion": "0.20.1",
   "server": "hyperf.kr",
   "serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip",
+  "crashReportDsn": "https://e283d3150aef4a3a849539faaf1c21ef@crash.hyperf.kr/1",
   "mods": [
     {"slug": "fabric-api"},
     {"slug": "sodium", "version": "mc26.3-0.9.2-fabric"},

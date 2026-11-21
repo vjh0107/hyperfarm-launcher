@@ -80,5 +80,6 @@
     "lang": "ko_kr",
     "onboardAccessibility": "false"
   },
-  "serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip"
+  "serverResourcePackUrl": "https://pack-prod.hyperf.kr/resource_pack.zip",
+  "crashReportDsn": "https://e283d3150aef4a3a849539faaf1c21ef@crash.hyperf.kr/1"
 }
