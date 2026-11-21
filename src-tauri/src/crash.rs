@@ -1,5 +1,7 @@
+mod fabric;
 mod reporting;
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -10,11 +12,14 @@ pub use reporting::{CrashReporter, LaunchContext};
 
 const CRASH_REPORTS: &str = "crash-reports";
 const JVM_REPORT_PREFIX: &str = "hs_err_pid";
+// 게임 로그는 몇 시간을 돌면 수십 MB 가 된다. 찾는 오류는 프로세스가 끝나기 직전에 쓴 것이라 끝만 읽는다
+const GAME_LOG_TAIL: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReportKind {
     Minecraft,
     Jvm,
+    GameLog,
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +37,11 @@ impl Report {
     }
 
     fn read(&self) -> Option<String> {
-        match std::fs::read(&self.path) {
+        let read = match self.kind {
+            ReportKind::GameLog => tail(&self.path, GAME_LOG_TAIL),
+            ReportKind::Minecraft | ReportKind::Jvm => std::fs::read(&self.path),
+        };
+        match read {
             Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
             Err(error) => {
                 log::warn!(
@@ -60,8 +69,14 @@ pub struct Crash {
 }
 
 impl Crash {
-    pub fn detect(code: Option<i32>, game_directory: &Path, started: SystemTime) -> Self {
-        let report = find_report(game_directory, started);
+    pub fn detect(
+        code: Option<i32>,
+        game_directory: &Path,
+        game_log: &Path,
+        started: SystemTime,
+    ) -> Self {
+        let report =
+            find_report(game_directory, started).or_else(|| find_loader_error(game_log, started));
         log::warn!(
             "The game crashed with code {}; report: {}",
             describe_code(code, cfg!(windows)),
@@ -150,6 +165,29 @@ fn find_report(game_directory: &Path, since: SystemTime) -> Option<Report> {
         .map(|(_, report)| report)
 }
 
+// 모드가 시작 단계에서 실패하면 loader 는 crash report 를 쓰지 않고 게임 로그에만 남긴다
+fn find_loader_error(game_log: &Path, since: SystemTime) -> Option<Report> {
+    let modified = std::fs::metadata(game_log).ok()?.modified().ok()?;
+    if modified < since {
+        return None;
+    }
+    let report = Report {
+        path: game_log.to_path_buf(),
+        kind: ReportKind::GameLog,
+    };
+    fabric::LoaderError::find(&report.read()?)?;
+    Some(report)
+}
+
+fn tail(path: &Path, bytes: u64) -> std::io::Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(bytes)))?;
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)?;
+    Ok(contents)
+}
+
 fn files(directory: &Path) -> impl Iterator<Item = PathBuf> + use<> {
     std::fs::read_dir(directory)
         .into_iter()
@@ -163,6 +201,9 @@ fn summarize(kind: ReportKind, text: &str) -> Vec<String> {
     match kind {
         ReportKind::Minecraft => minecraft_summary(text),
         ReportKind::Jvm => jvm_summary(text),
+        ReportKind::GameLog => fabric::LoaderError::find(text)
+            .map(|error| error.summary())
+            .unwrap_or_default(),
     }
 }
 
@@ -207,6 +248,7 @@ fn fingerprint(kind: ReportKind, text: &str) -> Option<Vec<String>> {
     match kind {
         ReportKind::Minecraft => minecraft_fingerprint(text),
         ReportKind::Jvm => jvm_fingerprint(text),
+        ReportKind::GameLog => fabric::LoaderError::find(text).map(|error| error.fingerprint()),
     }
 }
 
@@ -272,8 +314,12 @@ mod tests {
     use super::*;
 
     fn write_at(path: &Path, modified: SystemTime) {
+        write_with(path, "", modified);
+    }
+
+    fn write_with(path: &Path, contents: &str, modified: SystemTime) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, "").unwrap();
+        std::fs::write(path, contents).unwrap();
         std::fs::File::options()
             .write(true)
             .open(path)
@@ -312,6 +358,45 @@ mod tests {
         let report = find_report(game.path(), started).unwrap();
         assert_eq!(report.file_name(), "hs_err_pid2.log");
         assert_eq!(report.kind, ReportKind::Jvm);
+    }
+
+    #[test]
+    fn falls_back_to_the_game_log_when_a_mod_crashed_on_startup() {
+        let game = tempfile::tempdir().unwrap();
+        let started = SystemTime::now() - Duration::from_secs(600);
+        let log = game.path().join("logs").join("launcher-game.log");
+        let startup_crash = include_str!("crash/fabric/startup-crash.xml");
+        write_with(&log, startup_crash, started - Duration::from_secs(60));
+        assert!(
+            Crash::detect(Some(1), game.path(), &log, started)
+                .report
+                .is_none()
+        );
+
+        write_with(&log, startup_crash, started + Duration::from_secs(5));
+        let crash = Crash::detect(Some(1), game.path(), &log, started);
+        assert_eq!(
+            serde_json::to_value(&crash).unwrap()["report"],
+            "launcher-game.log"
+        );
+        let details = crash.details("0.1.14");
+        assert!(
+            details.contains("from mod qa_failmod\nmod: qa_failmod"),
+            "{details}"
+        );
+        assert!(!details.contains("secret chat"), "{details}");
+
+        write_at(
+            &game.path().join(CRASH_REPORTS).join("crash-client.txt"),
+            started + Duration::from_secs(1),
+        );
+        assert_eq!(
+            Crash::detect(Some(1), game.path(), &log, started)
+                .report
+                .unwrap()
+                .kind,
+            ReportKind::Minecraft
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ use crate::install::rules::{Platform, resolve_arguments};
 const WINDOW_MARKER: &str = "Backend library:";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const FEATURES: [&str; 1] = ["is_quick_play_multiplayer"];
+const FABRIC_NO_GUI: &str = "fabric.noGui";
 // 공식 launcher 의 기본 프로필과 같은 GC 다. 판에 든 JVM 인자에는 GC 가 없어, 이것을 빼면 손대지 않은 G1 이 돌아
 // 같은 PC 에서 공식 launcher 보다 끊김이 잦다
 const INITIAL_HEAP_MEGABYTES: u32 = 2048;
@@ -30,6 +31,7 @@ pub struct GameProcess {
     pub child: Child,
     pub started: SystemTime,
     pub directory: PathBuf,
+    pub log: PathBuf,
 }
 
 pub struct LaunchOptions<'a> {
@@ -83,6 +85,9 @@ pub fn command(
     command.extend(memory_arguments(options.memory_megabytes));
     // 보이스챗이 webrtc 네이티브를 System.load 로 싣는다. Java 25 는 경고만 내지만 이후 판은 막는다.
     command.push("--enable-native-access=ALL-UNNAMED".into());
+    // 없으면 모드가 시작 단계에서 실패할 때 Fabric loader 가 Swing 창을 띄우고, 그 창을 닫을 때까지 프로세스가 살아 있어
+    // 런처는 크래시를 알지 못한다. 켜 두면 loader 가 오류를 로그에 남기고 곧바로 System.exit(1) 로 끝난다(FabricGuiEntry)
+    command.push(format!("-D{FABRIC_NO_GUI}=true"));
     command.extend(substitute(&installation.jvm_arguments));
     command.push(installation.main_class.clone());
     command.extend(substitute(&installation.game_arguments));
@@ -144,6 +149,7 @@ pub async fn start(
             return Err(LauncherError::crashed(Crash::detect(
                 status.code(),
                 working_directory,
+                &log,
                 started,
             )));
         }
@@ -159,6 +165,7 @@ pub async fn start(
         child,
         started,
         directory: working_directory.to_path_buf(),
+        log,
     })
 }
 
@@ -171,6 +178,46 @@ mod tests {
         assert_eq!(memory_arguments(6144)[..2], ["-Xms2048M", "-Xmx6144M"]);
         assert_eq!(memory_arguments(1024)[..2], ["-Xms1024M", "-Xmx1024M"]);
         assert!(memory_arguments(4096).contains(&"-XX:+UseZGC".to_string()));
+    }
+
+    #[test]
+    fn tells_the_fabric_loader_to_exit_instead_of_opening_its_error_window() {
+        let installation = Installation {
+            java: PathBuf::from("java"),
+            classpath: Vec::new(),
+            main_class: "net.fabricmc.loader.impl.launch.knot.KnotClient".into(),
+            jvm_arguments: Vec::new(),
+            game_arguments: Vec::new(),
+            version_name: "fabric-loader-0.20.1-26.3".into(),
+            version_type: "release".into(),
+            asset_index: "30".into(),
+            assets_root: PathBuf::from("assets"),
+            libraries_root: PathBuf::from("libraries"),
+            natives: PathBuf::from("natives"),
+            game_directory: PathBuf::from("."),
+            server: "hyperf.kr".into(),
+        };
+        let session = MinecraftSession {
+            access_token: "token".into(),
+            player_id: "id".into(),
+            name: "name".into(),
+            xuid: "0".into(),
+        };
+        let options = LaunchOptions {
+            memory_megabytes: 4096,
+            client_id: "client",
+            launcher_version: "test",
+        };
+        let command = command(&installation, &session, &options, &Platform::current());
+        let property = command
+            .iter()
+            .position(|argument| argument == "-Dfabric.noGui=true")
+            .expect("the loader still opens its own error window");
+        let main_class = command
+            .iter()
+            .position(|argument| *argument == installation.main_class)
+            .unwrap();
+        assert!(property < main_class);
     }
 
     #[test]

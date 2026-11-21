@@ -88,6 +88,7 @@ impl Game {
                 *self.crash.lock().unwrap() = Some(Crash::detect(
                     status.code(),
                     &process.directory,
+                    &process.log,
                     process.started,
                 ));
             }
@@ -607,6 +608,7 @@ mod tests {
             child: command.kill_on_drop(true).spawn().unwrap(),
             started: SystemTime::now(),
             directory: directory.to_path_buf(),
+            log: directory.join("game.log"),
         }
     }
 

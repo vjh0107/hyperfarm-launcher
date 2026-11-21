@@ -1,0 +1,49 @@
+  <log4j:Event logger="FabricLoader/GameProvider" timestamp="1795228090101" level="INFO" thread="main">
+    <log4j:Message><![CDATA[Loading Minecraft 26.3 with Fabric Loader 0.20.1]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="FabricLoader" timestamp="1795228090102" level="INFO" thread="main">
+    <log4j:Message><![CDATA[Loading 9 mods from /Users/minsu/Library/Application Support/HyperFarm/mods]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="net.minecraft.client.gui.components.ChatComponent" timestamp="1795228090103" level="INFO" thread="Render thread">
+    <log4j:Message><![CDATA[[CHAT] <Steve_kr> my secret chat line]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="FabricLoader/Mixin" timestamp="1795228093875" level="ERROR" thread="main">
+    <log4j:Message><![CDATA[@Mixin target net.minecraft.client.QaMissingTarget was not found qa_failmod.mixins.json:ReadyProbeMixin from mod qa_failmod]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="FabricLoader/Mixin" timestamp="1795228093876" level="ERROR" thread="main">
+    <log4j:Message><![CDATA[Mixin prepare for mod qa_failmod failed preparing ReadyProbeMixin in qa_failmod.mixins.json: org.spongepowered.asm.mixin.transformer.throwables.InvalidMixinException @Mixin target net.minecraft.client.QaMissingTarget was not found qa_failmod.mixins.json:ReadyProbeMixin from mod qa_failmod]]></log4j:Message>
+    <log4j:Throwable><![CDATA[org.spongepowered.asm.mixin.transformer.throwables.InvalidMixinException: @Mixin target net.minecraft.client.QaMissingTarget was not found qa_failmod.mixins.json:ReadyProbeMixin from mod qa_failmod
+	at org.spongepowered.asm.mixin.transformer.MixinInfo.handleTargetError(MixinInfo.java:1059)
+	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
+]]></log4j:Throwable>
+  </log4j:Event>
+  <log4j:Event logger="FabricLoader" timestamp="1795228094010" level="ERROR" thread="main">
+    <log4j:Message><![CDATA[A mod crashed on startup!]]></log4j:Message>
+    <log4j:Throwable><![CDATA[net.fabricmc.loader.impl.FormattedException: java.lang.RuntimeException: Could not execute entrypoint stage 'preLaunch' due to errors, provided by 'sodium' at 'net.caffeinemc.mods.sodium.fabric.SodiumPreLaunch'!
+	at net.fabricmc.loader.impl.FormattedException.ofLocalized(FormattedException.java:63)
+	at net.fabricmc.loader.impl.launch.knot.Knot.init(Knot.java:158)
+	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:66)
+	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
+Caused by: java.lang.RuntimeException: Could not execute entrypoint stage 'preLaunch' due to errors, provided by 'sodium' at 'net.caffeinemc.mods.sodium.fabric.SodiumPreLaunch'!
+	at net.fabricmc.loader.impl.FabricLoaderImpl.lambda$invokeEntrypoints$0(FabricLoaderImpl.java:418)
+	at net.fabricmc.loader.impl.util.ExceptionUtil.gatherExceptions(ExceptionUtil.java:33)
+	... 2 more
+Caused by: net.fabricmc.loader.api.EntrypointException: Exception while loading entries for entrypoint 'preLaunch' provided by 'sodium'
+	at net.fabricmc.loader.impl.entrypoint.EntrypointContainerImpl.getEntrypoint(EntrypointContainerImpl.java:56)
+	... 3 more
+Caused by: java.lang.RuntimeException: Mixin transformation of net.caffeinemc.mods.sodium.fabric.SodiumPreLaunch failed
+	at net.fabricmc.loader.impl.launch.knot.KnotClassDelegate.getPostMixinClassByteArray(KnotClassDelegate.java:441)
+	... 4 more
+Caused by: org.spongepowered.asm.mixin.throwables.MixinApplyError: Mixin [qa_failmod.mixins.json:ReadyProbeMixin from mod qa_failmod] from phase [DEFAULT] in config [qa_failmod.mixins.json] FAILED during PREPARE
+	at org.spongepowered.asm.mixin.transformer.MixinProcessor.handleMixinError(MixinProcessor.java:685)
+	... 13 more
+Caused by: org.spongepowered.asm.mixin.transformer.throwables.InvalidMixinException: @Mixin target net.minecraft.client.QaMissingTarget was not found qa_failmod.mixins.json:ReadyProbeMixin from mod qa_failmod
+	at org.spongepowered.asm.mixin.transformer.MixinInfo.handleTargetError(MixinInfo.java:1059)
+	at org.spongepowered.asm.mixin.transformer.MixinInfo.getTargetClass(MixinInfo.java:1048)
+	... 21 more
+	Suppressed: java.lang.IllegalStateException: suppressed from mod other_mod
+		at a.B.c(B.java:1)
+	Caused by: java.lang.IllegalArgumentException: nested in a suppressed one
+		at a.B.d(B.java:2)
+]]></log4j:Throwable>
+  </log4j:Event>

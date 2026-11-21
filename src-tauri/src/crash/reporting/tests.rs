@@ -54,7 +54,7 @@ fn crash(directory: &Path, file: &str, text: &str, code: i32) -> Crash {
     let report = directory.join(file);
     std::fs::create_dir_all(report.parent().unwrap()).unwrap();
     std::fs::write(&report, text).unwrap();
-    Crash::detect(Some(code), directory, started)
+    Crash::detect(Some(code), directory, &directory.join("game.log"), started)
 }
 
 fn context(options: PathBuf, dsn: Option<String>) -> LaunchContext {
@@ -175,7 +175,12 @@ fn leaves_out_who_crashed_and_everything_but_the_summary() {
 #[test]
 fn groups_by_exit_code_when_there_is_no_report() {
     let game = tempfile::tempdir().unwrap();
-    let crash = Crash::detect(Some(-1_073_741_819), game.path(), SystemTime::now());
+    let crash = Crash::detect(
+        Some(-1_073_741_819),
+        game.path(),
+        &game.path().join("game.log"),
+        SystemTime::now(),
+    );
     let event = event(
         &crash,
         &context(game.path().join("options.txt"), None),
@@ -297,4 +302,41 @@ async fn sends_nothing_when_turned_off_or_when_the_pack_names_no_address() {
     reporter.sent(Duration::from_secs(10)).await;
 
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[test]
+fn reports_a_mod_that_crashed_on_startup_from_the_game_log_without_its_chat() {
+    let game = tempfile::tempdir().unwrap();
+    let log = game.path().join("logs").join("launcher-game.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, include_str!("../fabric/startup-crash.xml")).unwrap();
+    let crash = Crash::detect(
+        Some(1),
+        game.path(),
+        &log,
+        SystemTime::now() - Duration::from_secs(60),
+    );
+    let event = event(
+        &crash,
+        &context(game.path().join("options.txt"), None),
+        &machine(),
+        SystemTime::now(),
+    );
+    assert_eq!(
+        event["fingerprint"],
+        json!([
+            "org.spongepowered.asm.mixin.transformer.throwables.InvalidMixinException",
+            "qa_failmod"
+        ])
+    );
+    assert_eq!(event["tags"]["report"], "game-log");
+    assert!(
+        event["message"]["formatted"]
+            .as_str()
+            .unwrap()
+            .ends_with("mod: qa_failmod")
+    );
+    let sent = event.to_string();
+    assert!(!sent.contains("secret chat"), "{sent}");
+    assert!(!sent.contains("Steve_kr"), "{sent}");
 }

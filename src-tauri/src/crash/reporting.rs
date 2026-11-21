@@ -192,6 +192,7 @@ fn event(crash: &Crash, context: &LaunchContext, machine: &Machine, now: SystemT
     let report_kind = match crash.report.as_ref().map(|report| report.kind) {
         Some(ReportKind::Minecraft) => "crash-report",
         Some(ReportKind::Jvm) => "hs_err",
+        Some(ReportKind::GameLog) => "game-log",
         None => "none",
     };
 
