@@ -346,7 +346,7 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
     h(
       "div",
       { class: "item" },
-      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "크래시 보고"), h("span", { class: "caption" }, "게임이 꺼진 원인만 보내고, 계정은 보내지 않아요")),
+      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "크래시 보고"), h("span", { class: "caption" }, "꺼진 원인과 PC·런처 정보만 보내고, 계정은 보내지 않아요")),
       crashReports,
     ),
   );
