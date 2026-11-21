@@ -1,8 +1,12 @@
+mod reporting;
+
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Serialize, Serializer};
 use sysinfo::System;
+
+pub use reporting::{CrashReporter, LaunchContext};
 
 const CRASH_REPORTS: &str = "crash-reports";
 const JVM_REPORT_PREFIX: &str = "hs_err_pid";
@@ -27,17 +31,23 @@ impl Report {
             .unwrap_or_default()
     }
 
-    fn summary(&self) -> Vec<String> {
+    fn read(&self) -> Option<String> {
         match std::fs::read(&self.path) {
-            Ok(bytes) => summarize(self.kind, &String::from_utf8_lossy(&bytes)),
+            Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
             Err(error) => {
                 log::warn!(
                     "Could not read the crash report {}: {error}",
                     self.path.display()
                 );
-                Vec::new()
+                None
             }
         }
+    }
+
+    fn summary(&self) -> Vec<String> {
+        self.read()
+            .map(|text| summarize(self.kind, &text))
+            .unwrap_or_default()
     }
 }
 
@@ -45,6 +55,8 @@ impl Report {
 pub struct Crash {
     code: Option<i32>,
     report: Option<Report>,
+    // 보내지 못해도 이 크래시를 가리키는 id 다. 나중에 플레이어가 보고하면 같은 id 로 Bugsink 의 이벤트에 닿는다
+    event_id: String,
 }
 
 impl Crash {
@@ -57,7 +69,11 @@ impl Crash {
                 .as_ref()
                 .map_or_else(|| "none".into(), |report| report.path.display().to_string())
         );
-        Self { code, report }
+        Self {
+            code,
+            report,
+            event_id: hex::encode(rand::random::<[u8; 16]>()),
+        }
     }
 
     pub fn report_path(&self) -> Option<&Path> {
@@ -186,6 +202,52 @@ fn jvm_summary(text: &str) -> Vec<String> {
         .collect()
 }
 
+// 같은 원인의 크래시를 한 묶음으로 센다. 주소·pid·메시지처럼 크래시마다 바뀌는 것은 넣지 않는다
+fn fingerprint(kind: ReportKind, text: &str) -> Option<Vec<String>> {
+    match kind {
+        ReportKind::Minecraft => minecraft_fingerprint(text),
+        ReportKind::Jvm => jvm_fingerprint(text),
+    }
+}
+
+fn minecraft_fingerprint(text: &str) -> Option<Vec<String>> {
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| !line.starts_with("Description:"))
+        .skip(1)
+        .skip_while(|line| line.is_empty());
+    let exception = lines.next()?;
+    let class = exception.split(':').next().unwrap_or(exception).trim();
+    if class.is_empty() || class.contains(char::is_whitespace) {
+        return None;
+    }
+    // 뒤에 붙는 ~[client-intermediary.jar:?] 같은 jar 이름은 판마다 바뀌어, 두면 같은 크래시가 판마다 따로 묶인다
+    let frame = lines
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| line.strip_prefix("at "))
+        .map(|frame| frame.find(')').map_or(frame, |end| &frame[..=end]));
+    Some(
+        std::iter::once(class)
+            .chain(frame)
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+fn jvm_fingerprint(text: &str) -> Option<Vec<String>> {
+    let frame = text
+        .lines()
+        .filter_map(|line| line.strip_prefix('#'))
+        .map(str::trim)
+        .skip_while(|line| *line != "Problematic frame:")
+        .nth(1)?;
+    let module = frame.split_once('[')?.1.split_once(']')?.0;
+    let (name, offset) = module.split_once('+')?;
+    (!name.is_empty() && !name.starts_with("0x") && offset.starts_with("0x"))
+        .then(|| vec![module.to_string()])
+}
+
 fn operating_system() -> String {
     let name = System::long_os_version().unwrap_or_else(|_| std::env::consts::OS.to_string());
     match System::kernel_version() {
@@ -275,6 +337,35 @@ mod tests {
                 "C  [atio6axx.dll+0x1a2b3c]",
             ]
         );
+    }
+
+    #[test]
+    fn groups_a_minecraft_crash_by_its_exception_class_and_first_frame() {
+        let report = "Description: Rendering overlay\n\njava.lang.IllegalStateException: Atlas 4096x8192 is too big\n\tat knot//net.minecraft.client.Foo.bar(Foo.java:12) ~[client-intermediary-26.3.jar:?]\n\tat knot//net.minecraft.client.Main.main(Main.java:3)\n";
+        assert_eq!(
+            fingerprint(ReportKind::Minecraft, report).unwrap(),
+            [
+                "java.lang.IllegalStateException",
+                "knot//net.minecraft.client.Foo.bar(Foo.java:12)",
+            ]
+        );
+        let bare = "Description: Ticking entity\n\njava.lang.NullPointerException\n\n-- Head --\n\tat a.B.c(B.java:1)\n";
+        assert_eq!(
+            fingerprint(ReportKind::Minecraft, bare).unwrap(),
+            ["java.lang.NullPointerException"]
+        );
+        assert!(fingerprint(ReportKind::Minecraft, "no description here").is_none());
+    }
+
+    #[test]
+    fn groups_a_jvm_fatal_error_by_the_module_and_offset_of_its_problematic_frame() {
+        let report = "#  EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ffb1a2b3c4d, pid=18244, tid=9876\n# Problematic frame:\n# C  [atio6axx.dll+0x1512fe5]\n#\n";
+        assert_eq!(
+            fingerprint(ReportKind::Jvm, report).unwrap(),
+            ["atio6axx.dll+0x1512fe5"]
+        );
+        let compiled = "# Problematic frame:\n# J 4567 c2 net.minecraft.Foo.bar(I)V (120 bytes) @ 0x000001f2a3b4c5d6 [0x000001f2a3b4c400+0x00000000000001d6]\n";
+        assert!(fingerprint(ReportKind::Jvm, compiled).is_none());
     }
 
     #[test]

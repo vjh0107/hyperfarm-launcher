@@ -162,19 +162,25 @@ async function changeFolder(): Promise<void> {
 
 async function openSettings(): Promise<void> {
   beforeSettings = current;
-  const settings = await invoke<LauncherSettings>("load_settings");
+  let settings = await invoke<LauncherSettings>("load_settings");
+  const save = (changes: Partial<LauncherSettings>) => {
+    settings = { ...settings, ...changes };
+    void invoke("save_settings", { settings });
+  };
   const footer = `런처 ${info.version}${pack ? ` · 마인크래프트 ${pack.minecraftVersion} · Fabric` : ""}`;
   show(
     settingsScreen(
       chrome,
       {
         memoryMegabytes: settings.memoryMegabytes,
+        sendCrashReports: settings.sendCrashReports,
         totalMemoryBytes: info.totalMemoryBytes,
         gameDirectory: info.gameDirectory,
         session,
         webBase: info.webBase,
         footer,
-        onMemory: (memoryMegabytes) => void invoke("save_settings", { settings: { ...settings, memoryMegabytes } }),
+        onMemory: (memoryMegabytes) => save({ memoryMegabytes }),
+        onCrashReports: (sendCrashReports) => save({ sendCrashReports }),
         onOpenFolder: () => void invoke("open_game_directory"),
         onSignOut: () => {
           session = null;

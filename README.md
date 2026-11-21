@@ -96,6 +96,10 @@ CraftEngine 이 정하는 대로 SHA-1 16진 문자열의 `UUID.nameUUIDFromByte
 보내는 것을 그대로 받는다. 게임서버 차트의 `storage.resourcepackCdn`·`resourcepackUploadPath` 를 바꾸면 이 값도 함께
 바꾼다.
 
+`crashReportDsn` 은 크래시 요약을 받을 Bugsink 프로젝트의 DSN(`https://<공개 키>@<호스트>/<프로젝트 id>`)이다. launcher 는
+게임이 0 이 아닌 코드로 꺼지면 그 요약을 envelope 하나로 보낸다. 키가 없으면 보내지 않으므로, launcher 를 다시 내지
+않고 이 값을 넣고 빼서 켜고 끈다. 옛 launcher 는 이 키를 읽지 않는다. 무엇을 보내는지는 `## Privacy` 에 있다.
+
 `pack-update.yml` 이 매주 월요일 새벽에 `sources.json` 을 다시 풀어, 바뀐 모드가 있으면 이전·새 판을 표로 적은
 `pack/update` PR 을 연다. CI 는 manifest 의 모양만 보므로, 게임이 뜨고 쉐이더를 켠 화면이 깨지지 않는지는 사람이
 확인한 뒤 머지한다.
@@ -141,7 +145,7 @@ Windows 코드 서명은 아직 없다. SmartScreen 은 "추가 정보" → "실
 ## Privacy
 
 This program does not send any information to other networked systems except what is needed to sign the player in and
-start the game they asked to play:
+start the game they asked to play, and a summary of each game crash unless the player turns that off:
 
 - **Microsoft, Xbox Live and Minecraft services** receive the player's sign-in to obtain a Minecraft session, as every
   Minecraft launcher does. The Microsoft refresh token is stored only in the operating system's credential store on the
@@ -152,9 +156,18 @@ start the game they asked to play:
   without sending account data.
 - **Discord**, if it is running on the player's computer, is told over its local connection that the player is playing,
   with the start time, so that it can show this on the player's profile. Nothing is sent when Discord is not running.
+- **HyperFarm's crash server**, named by `crashReportDsn` in the pack manifest, receives a summary when the game exits
+  with an error: the exit code; the description, exception and first stack frame from the game's crash report, or the
+  error and problematic frame from the JVM's fatal error log, and that file's name; the operating system and its
+  version, the CPU architecture, the graphics card vendor (on Windows), the graphics backend in `options.txt`, the
+  HyperFarm mod version and the launcher version. They are sent under a random id the launcher makes for that crash.
+  It does not receive the player's name, UUID or Xbox user id, the computer's name, chat, environment variables, the
+  game's launch command or the rest of the report, and home folders, UUIDs and IP addresses found in the sent lines are
+  removed first. Like any web server, it sees the connection the summary arrives over. Players turn this off with the
+  크래시 보고 switch in the launcher's settings, and nothing is sent while the pack manifest names no crash server.
 
-The launcher has no analytics or telemetry. The game itself connects to the HyperFarm server, whose
-[privacy policy](https://hyperf.kr/privacy) applies there.
+Apart from these crash summaries, the launcher has no analytics or telemetry. The game itself connects to the
+HyperFarm server, whose [privacy policy](https://hyperf.kr/privacy) applies there.
 
 ## 라이선스
 
