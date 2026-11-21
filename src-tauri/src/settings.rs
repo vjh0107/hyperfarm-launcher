@@ -42,6 +42,13 @@ impl LauncherConfig {
 pub struct LauncherSettings {
     pub memory_megabytes: u32,
     pub game_directory: Option<PathBuf>,
+    // 0.1.13 까지의 launcher.json 에는 이 키가 없다. 기본값이 없으면 그 파일을 읽지 못해 메모리와 폴더 설정이 통째로 초기화된다
+    #[serde(default = "sends_crash_reports_by_default")]
+    pub send_crash_reports: bool,
+}
+
+fn sends_crash_reports_by_default() -> bool {
+    true
 }
 
 impl LauncherSettings {
@@ -53,6 +60,7 @@ impl LauncherSettings {
                 4096
             },
             game_directory: None,
+            send_crash_reports: sends_crash_reports_by_default(),
         }
     }
 }
@@ -114,7 +122,28 @@ mod tests {
             store.load(),
             LauncherSettings {
                 memory_megabytes: 6144,
-                game_directory: None
+                game_directory: None,
+                send_crash_reports: true,
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_the_settings_of_a_file_written_before_crash_reports_existed() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("launcher.json");
+        std::fs::write(
+            &file,
+            r#"{"memoryMegabytes": 8192, "gameDirectory": "/games/HyperFarm"}"#,
+        )
+        .unwrap();
+        let store = SettingsStore::new(file, LARGER_HEAP_FROM);
+        assert_eq!(
+            store.load(),
+            LauncherSettings {
+                memory_megabytes: 8192,
+                game_directory: Some(PathBuf::from("/games/HyperFarm")),
+                send_crash_reports: true,
             }
         );
     }

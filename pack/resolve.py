@@ -100,8 +100,9 @@ def main():
         "shaderpacks": resolve(sources["shaderpacks"], ["iris"], game_version),
         "defaultOptions": sources["defaultOptions"],
     }
-    if "serverResourcePackUrl" in sources:
-        manifest["serverResourcePackUrl"] = sources["serverResourcePackUrl"]
+    for key in ("serverResourcePackUrl", "crashReportDsn"):
+        if key in sources:
+            manifest[key] = sources[key]
     (PACK / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
 
 

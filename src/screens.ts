@@ -275,12 +275,14 @@ export function accountRows(webBase: string, rows: { label: string; playerId: st
 
 export interface SettingsModel {
   memoryMegabytes: number;
+  sendCrashReports: boolean;
   totalMemoryBytes: number;
   gameDirectory: string;
   session: { playerId: string; name: string } | null;
   webBase: string;
   footer: string;
   onMemory(megabytes: number): void;
+  onCrashReports(send: boolean): void;
   onOpenFolder(): void;
   onSignOut(): void;
 }
@@ -319,6 +321,12 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
     signOut.disabled = true;
   });
   signOut.disabled = model.session === null;
+  const crashReports = h("button", { class: "switch", role: "switch", "aria-checked": String(model.sendCrashReports), "aria-label": "크래시 보고" });
+  crashReports.addEventListener("click", () => {
+    const send = crashReports.getAttribute("aria-checked") !== "true";
+    crashReports.setAttribute("aria-checked", String(send));
+    model.onCrashReports(send);
+  });
   const places = h(
     "div",
     { class: "card places" },
@@ -334,6 +342,12 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
       head(model.webBase, model.session?.playerId ?? null, 28, 6),
       h("div", { class: "item-text" }, h("span", { class: "item-title" }, model.session?.name ?? "로그인 전"), kind),
       signOut,
+    ),
+    h(
+      "div",
+      { class: "item" },
+      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "크래시 보고"), h("span", { class: "caption" }, "꺼진 원인과 PC·런처 정보만 보내고, 계정은 보내지 않아요")),
+      crashReports,
     ),
   );
 

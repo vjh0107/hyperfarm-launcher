@@ -35,6 +35,7 @@ const GAME_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const UPDATE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+const CRASH_REPORT_GRACE: Duration = Duration::from_secs(5);
 
 type Flow = Arc<LaunchFlow>;
 
@@ -87,6 +88,7 @@ impl Game {
                 *self.crash.lock().unwrap() = Some(Crash::detect(
                     status.code(),
                     &process.directory,
+                    &process.log,
                     process.started,
                 ));
             }
@@ -172,7 +174,7 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
         presence.abort();
         match app.state::<Game>().crash() {
             Some(crash) => show_crash(&app, crash),
-            None => app.exit(0),
+            None => exit_after_crash_reports(&app),
         }
     });
 }
@@ -180,7 +182,9 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
 // 창을 다시 만들면 화면은 처음부터 다시 읽히므로, 이벤트가 아니라 화면이 뜨면서 묻는 crash 명령으로 넘긴다.
 // Game 의 크래시는 창을 띄운 뒤에 비운다. 그 전에 비우면 창이 없는 사이의 종료 요청이 런처를 끝낸다
 fn show_crash(app: &AppHandle, crash: Crash) {
-    app.state::<Flow>().record_crash(crash);
+    let flow = app.state::<Flow>();
+    flow.report_crash(&crash);
+    flow.record_crash(crash);
     #[cfg(target_os = "macos")]
     if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
         log::warn!("Could not bring the launcher back to the Dock: {error}");
@@ -201,7 +205,7 @@ fn show_crash(app: &AppHandle, crash: Crash) {
         }
         Err(error) => {
             log::warn!("Could not reopen the launcher window after the crash: {error}");
-            app.exit(0);
+            exit_after_crash_reports(app);
         }
     }
 }
@@ -341,7 +345,24 @@ async fn choose_game_directory(
 
 #[tauri::command]
 fn quit(app: AppHandle) {
-    app.exit(0);
+    exit_after_crash_reports(&app);
+}
+
+// 크래시 화면은 뜨자마자 닫힐 수 있다. 곧바로 끝내면 보내던 크래시 보고가 프로세스와 함께 잘리므로, 창만 먼저 감추고 기다린다
+fn exit_after_crash_reports(app: &AppHandle) {
+    if app.state::<Flow>().is_sending_crash_reports()
+        && let Some(window) = app.get_webview_window("main")
+        && let Err(error) = window.hide()
+    {
+        log::warn!("Could not hide the launcher window while sending the crash report: {error}");
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        app.state::<Flow>()
+            .crash_reports_sent(CRASH_REPORT_GRACE)
+            .await;
+        app.exit(0);
+    });
 }
 
 // 고칠 판이 있으면 내려받아 깔고 다시 띄운다. 확인이 실패해도 지금 판으로 게임은 켠다.
@@ -548,12 +569,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("the launcher window failed to start")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested {
+            let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = event
-                && app.state::<Game>().keeps_launcher_open()
-            {
+            else {
+                return;
+            };
+            if app.state::<Game>().keeps_launcher_open() {
                 api.prevent_exit();
+            } else if app.state::<Flow>().is_sending_crash_reports() {
+                api.prevent_exit();
+                exit_after_crash_reports(app);
             }
         });
 }
@@ -582,6 +608,7 @@ mod tests {
             child: command.kill_on_drop(true).spawn().unwrap(),
             started: SystemTime::now(),
             directory: directory.to_path_buf(),
+            log: directory.join("game.log"),
         }
     }
 

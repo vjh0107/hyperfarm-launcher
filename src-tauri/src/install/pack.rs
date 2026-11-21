@@ -17,6 +17,17 @@ pub struct PackManifest {
     pub default_options: BTreeMap<String, String>,
     // 옛 키(serverResourcePack)로 되돌리면 0.1.5 까지의 launcher 가 읽고, 엣지에 옛 팩이 남아 있을 때 실행을 멈춘다
     pub server_resource_pack_url: Option<String>,
+    pub crash_report_dsn: Option<String>,
+}
+
+impl PackManifest {
+    pub fn hyperfarm_mod_version(&self) -> Option<&str> {
+        self.mods.iter().find_map(|file| {
+            file.file_name
+                .strip_prefix("hyperfarm-")?
+                .strip_suffix(".jar")
+        })
+    }
 }
 
 #[derive(Deserialize, Clone, Debug)]

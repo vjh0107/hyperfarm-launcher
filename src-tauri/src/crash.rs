@@ -1,16 +1,25 @@
+mod fabric;
+mod reporting;
+
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Serialize, Serializer};
 use sysinfo::System;
 
+pub use reporting::{CrashReporter, LaunchContext};
+
 const CRASH_REPORTS: &str = "crash-reports";
 const JVM_REPORT_PREFIX: &str = "hs_err_pid";
+// 게임 로그는 몇 시간을 돌면 수십 MB 가 된다. 찾는 오류는 프로세스가 끝나기 직전에 쓴 것이라 끝만 읽는다
+const GAME_LOG_TAIL: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReportKind {
     Minecraft,
     Jvm,
+    GameLog,
 }
 
 #[derive(Debug, Clone)]
@@ -27,17 +36,27 @@ impl Report {
             .unwrap_or_default()
     }
 
-    fn summary(&self) -> Vec<String> {
-        match std::fs::read(&self.path) {
-            Ok(bytes) => summarize(self.kind, &String::from_utf8_lossy(&bytes)),
+    fn read(&self) -> Option<String> {
+        let read = match self.kind {
+            ReportKind::GameLog => tail(&self.path, GAME_LOG_TAIL),
+            ReportKind::Minecraft | ReportKind::Jvm => std::fs::read(&self.path),
+        };
+        match read {
+            Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
             Err(error) => {
                 log::warn!(
                     "Could not read the crash report {}: {error}",
                     self.path.display()
                 );
-                Vec::new()
+                None
             }
         }
+    }
+
+    fn summary(&self) -> Vec<String> {
+        self.read()
+            .map(|text| summarize(self.kind, &text))
+            .unwrap_or_default()
     }
 }
 
@@ -45,11 +64,19 @@ impl Report {
 pub struct Crash {
     code: Option<i32>,
     report: Option<Report>,
+    // 보내지 못해도 이 크래시를 가리키는 id 다. 나중에 플레이어가 보고하면 같은 id 로 Bugsink 의 이벤트에 닿는다
+    event_id: String,
 }
 
 impl Crash {
-    pub fn detect(code: Option<i32>, game_directory: &Path, started: SystemTime) -> Self {
-        let report = find_report(game_directory, started);
+    pub fn detect(
+        code: Option<i32>,
+        game_directory: &Path,
+        game_log: &Path,
+        started: SystemTime,
+    ) -> Self {
+        let report =
+            find_report(game_directory, started).or_else(|| find_loader_error(game_log, started));
         log::warn!(
             "The game crashed with code {}; report: {}",
             describe_code(code, cfg!(windows)),
@@ -57,7 +84,11 @@ impl Crash {
                 .as_ref()
                 .map_or_else(|| "none".into(), |report| report.path.display().to_string())
         );
-        Self { code, report }
+        Self {
+            code,
+            report,
+            event_id: hex::encode(rand::random::<[u8; 16]>()),
+        }
     }
 
     pub fn report_path(&self) -> Option<&Path> {
@@ -134,6 +165,29 @@ fn find_report(game_directory: &Path, since: SystemTime) -> Option<Report> {
         .map(|(_, report)| report)
 }
 
+// 모드가 시작 단계에서 실패하면 loader 는 crash report 를 쓰지 않고 게임 로그에만 남긴다
+fn find_loader_error(game_log: &Path, since: SystemTime) -> Option<Report> {
+    let modified = std::fs::metadata(game_log).ok()?.modified().ok()?;
+    if modified < since {
+        return None;
+    }
+    let report = Report {
+        path: game_log.to_path_buf(),
+        kind: ReportKind::GameLog,
+    };
+    fabric::LoaderError::find(&report.read()?)?;
+    Some(report)
+}
+
+fn tail(path: &Path, bytes: u64) -> std::io::Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(bytes)))?;
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)?;
+    Ok(contents)
+}
+
 fn files(directory: &Path) -> impl Iterator<Item = PathBuf> + use<> {
     std::fs::read_dir(directory)
         .into_iter()
@@ -147,6 +201,9 @@ fn summarize(kind: ReportKind, text: &str) -> Vec<String> {
     match kind {
         ReportKind::Minecraft => minecraft_summary(text),
         ReportKind::Jvm => jvm_summary(text),
+        ReportKind::GameLog => fabric::LoaderError::find(text)
+            .map(|error| error.summary())
+            .unwrap_or_default(),
     }
 }
 
@@ -186,6 +243,53 @@ fn jvm_summary(text: &str) -> Vec<String> {
         .collect()
 }
 
+// 같은 원인의 크래시를 한 묶음으로 센다. 주소·pid·메시지처럼 크래시마다 바뀌는 것은 넣지 않는다
+fn fingerprint(kind: ReportKind, text: &str) -> Option<Vec<String>> {
+    match kind {
+        ReportKind::Minecraft => minecraft_fingerprint(text),
+        ReportKind::Jvm => jvm_fingerprint(text),
+        ReportKind::GameLog => fabric::LoaderError::find(text).map(|error| error.fingerprint()),
+    }
+}
+
+fn minecraft_fingerprint(text: &str) -> Option<Vec<String>> {
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| !line.starts_with("Description:"))
+        .skip(1)
+        .skip_while(|line| line.is_empty());
+    let exception = lines.next()?;
+    let class = exception.split(':').next().unwrap_or(exception).trim();
+    if class.is_empty() || class.contains(char::is_whitespace) {
+        return None;
+    }
+    // 뒤에 붙는 ~[client-intermediary.jar:?] 같은 jar 이름은 판마다 바뀌어, 두면 같은 크래시가 판마다 따로 묶인다
+    let frame = lines
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| line.strip_prefix("at "))
+        .map(|frame| frame.find(')').map_or(frame, |end| &frame[..=end]));
+    Some(
+        std::iter::once(class)
+            .chain(frame)
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+fn jvm_fingerprint(text: &str) -> Option<Vec<String>> {
+    let frame = text
+        .lines()
+        .filter_map(|line| line.strip_prefix('#'))
+        .map(str::trim)
+        .skip_while(|line| *line != "Problematic frame:")
+        .nth(1)?;
+    let module = frame.split_once('[')?.1.split_once(']')?.0;
+    let (name, offset) = module.split_once('+')?;
+    (!name.is_empty() && !name.starts_with("0x") && offset.starts_with("0x"))
+        .then(|| vec![module.to_string()])
+}
+
 fn operating_system() -> String {
     let name = System::long_os_version().unwrap_or_else(|_| std::env::consts::OS.to_string());
     match System::kernel_version() {
@@ -210,8 +314,12 @@ mod tests {
     use super::*;
 
     fn write_at(path: &Path, modified: SystemTime) {
+        write_with(path, "", modified);
+    }
+
+    fn write_with(path: &Path, contents: &str, modified: SystemTime) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, "").unwrap();
+        std::fs::write(path, contents).unwrap();
         std::fs::File::options()
             .write(true)
             .open(path)
@@ -253,6 +361,45 @@ mod tests {
     }
 
     #[test]
+    fn falls_back_to_the_game_log_when_a_mod_crashed_on_startup() {
+        let game = tempfile::tempdir().unwrap();
+        let started = SystemTime::now() - Duration::from_secs(600);
+        let log = game.path().join("logs").join("launcher-game.log");
+        let startup_crash = include_str!("crash/fabric/startup-crash.xml");
+        write_with(&log, startup_crash, started - Duration::from_secs(60));
+        assert!(
+            Crash::detect(Some(1), game.path(), &log, started)
+                .report
+                .is_none()
+        );
+
+        write_with(&log, startup_crash, started + Duration::from_secs(5));
+        let crash = Crash::detect(Some(1), game.path(), &log, started);
+        assert_eq!(
+            serde_json::to_value(&crash).unwrap()["report"],
+            "launcher-game.log"
+        );
+        let details = crash.details("0.1.14");
+        assert!(
+            details.contains("from mod qa_failmod\nmod: qa_failmod"),
+            "{details}"
+        );
+        assert!(!details.contains("secret chat"), "{details}");
+
+        write_at(
+            &game.path().join(CRASH_REPORTS).join("crash-client.txt"),
+            started + Duration::from_secs(1),
+        );
+        assert_eq!(
+            Crash::detect(Some(1), game.path(), &log, started)
+                .report
+                .unwrap()
+                .kind,
+            ReportKind::Minecraft
+        );
+    }
+
+    #[test]
     fn summarizes_a_minecraft_crash_report_by_its_description_and_first_exception() {
         let report = "---- Minecraft Crash Report ----\n// Who set us up the TNT?\n\nTime: 2026-11-20 21:13:05\nDescription: Rendering overlay\n\njava.lang.IllegalStateException: Atlas is too big\n\tat knot//net.minecraft.client.Foo.bar(Foo.java:1)\n\nCaused by: java.lang.RuntimeException: inner\n";
         assert_eq!(
@@ -275,6 +422,35 @@ mod tests {
                 "C  [atio6axx.dll+0x1a2b3c]",
             ]
         );
+    }
+
+    #[test]
+    fn groups_a_minecraft_crash_by_its_exception_class_and_first_frame() {
+        let report = "Description: Rendering overlay\n\njava.lang.IllegalStateException: Atlas 4096x8192 is too big\n\tat knot//net.minecraft.client.Foo.bar(Foo.java:12) ~[client-intermediary-26.3.jar:?]\n\tat knot//net.minecraft.client.Main.main(Main.java:3)\n";
+        assert_eq!(
+            fingerprint(ReportKind::Minecraft, report).unwrap(),
+            [
+                "java.lang.IllegalStateException",
+                "knot//net.minecraft.client.Foo.bar(Foo.java:12)",
+            ]
+        );
+        let bare = "Description: Ticking entity\n\njava.lang.NullPointerException\n\n-- Head --\n\tat a.B.c(B.java:1)\n";
+        assert_eq!(
+            fingerprint(ReportKind::Minecraft, bare).unwrap(),
+            ["java.lang.NullPointerException"]
+        );
+        assert!(fingerprint(ReportKind::Minecraft, "no description here").is_none());
+    }
+
+    #[test]
+    fn groups_a_jvm_fatal_error_by_the_module_and_offset_of_its_problematic_frame() {
+        let report = "#  EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ffb1a2b3c4d, pid=18244, tid=9876\n# Problematic frame:\n# C  [atio6axx.dll+0x1512fe5]\n#\n";
+        assert_eq!(
+            fingerprint(ReportKind::Jvm, report).unwrap(),
+            ["atio6axx.dll+0x1512fe5"]
+        );
+        let compiled = "# Problematic frame:\n# J 4567 c2 net.minecraft.Foo.bar(I)V (120 bytes) @ 0x000001f2a3b4c5d6 [0x000001f2a3b4c400+0x00000000000001d6]\n";
+        assert!(fingerprint(ReportKind::Jvm, compiled).is_none());
     }
 
     #[test]

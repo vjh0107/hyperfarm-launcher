@@ -11,7 +11,7 @@ use crate::auth::microsoft::{BrowserOpener, MicrosoftClient, MicrosoftEndpoints}
 use crate::auth::store::KeyringAccountStore;
 use crate::auth::xbox::{XboxClient, XboxEndpoints};
 use crate::auth::{AuthError, Authenticator, MinecraftSession};
-use crate::crash::Crash;
+use crate::crash::{Crash, CrashReporter, LaunchContext};
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
@@ -102,6 +102,8 @@ struct Prepared {
     installation: Installation,
     layout: GameLayout,
     default_options: BTreeMap<String, String>,
+    crash_report_dsn: Option<String>,
+    hyperfarm_mod: Option<String>,
     at: Instant,
 }
 
@@ -143,6 +145,7 @@ pub struct LaunchFlow {
     mismatched: Mutex<Option<MinecraftSession>>,
     prepared: Mutex<Option<Prepared>>,
     crash: Mutex<Option<Crash>>,
+    crash_reports: CrashReporter,
     sign_outs: AtomicU64,
     sign_in_url: Arc<Mutex<Option<String>>>,
 }
@@ -172,6 +175,7 @@ impl LaunchFlow {
         Self {
             config,
             platform: Platform::current(),
+            crash_reports: CrashReporter::new(http.clone()),
             http,
             authenticator,
             settings,
@@ -269,6 +273,9 @@ impl LaunchFlow {
             }
             Err(AuthError::Failed(error)) => {
                 log::warn!("Launch stopped with {:?}: {}", error.problem, error.message);
+                if let Some(crash) = &error.crash {
+                    self.report_crash(crash);
+                }
                 self.crash.lock().unwrap().clone_from(&error.crash);
                 LaunchEvent::Failed { error }
             }
@@ -316,6 +323,19 @@ impl LaunchFlow {
 
     pub fn crash(&self) -> Option<Crash> {
         self.crash.lock().unwrap().clone()
+    }
+
+    pub fn report_crash(&self, crash: &Crash) {
+        self.crash_reports
+            .report(crash, self.settings.load().send_crash_reports);
+    }
+
+    pub fn is_sending_crash_reports(&self) -> bool {
+        self.crash_reports.is_sending()
+    }
+
+    pub async fn crash_reports_sent(&self, within: Duration) {
+        self.crash_reports.sent(within).await;
     }
 
     pub fn game_log(&self) -> PathBuf {
@@ -437,6 +457,8 @@ impl LaunchFlow {
             session,
             installation,
             layout,
+            hyperfarm_mod: pack.hyperfarm_mod_version().map(str::to_string),
+            crash_report_dsn: pack.crash_report_dsn,
             default_options: pack.default_options,
             at: Instant::now(),
         })
@@ -449,16 +471,29 @@ impl LaunchFlow {
             installation,
             layout,
             default_options,
+            crash_report_dsn,
+            hyperfarm_mod,
             ..
         } = prepared;
-        let prefer_vulkan = options::amd_display_adapter().await;
+        let display_adapters = options::display_adapter_vendors().await;
         options::prepare(
             &layout.options(),
             &default_options,
             (self.work_area)(),
-            prefer_vulkan,
+            options::prefers_vulkan(display_adapters.as_deref()),
         )
         .await;
+        self.crash_reports.launching(LaunchContext {
+            dsn: crash_report_dsn,
+            display_adapters,
+            hyperfarm_mod,
+            options: layout.options(),
+            player: vec![
+                session.name.clone(),
+                session.player_id.clone(),
+                session.xuid.clone(),
+            ],
+        });
 
         (self.emit)(LaunchEvent::Launching {
             server: installation.server.clone(),

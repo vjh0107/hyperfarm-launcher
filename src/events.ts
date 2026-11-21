@@ -52,6 +52,7 @@ export interface AppInfo {
 export interface LauncherSettings {
   memoryMegabytes: number;
   gameDirectory: string | null;
+  sendCrashReports: boolean;
 }
 
 export type Step = "retry" | "switchAccount" | "continueAnyway" | "play";

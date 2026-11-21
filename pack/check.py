@@ -20,7 +20,7 @@ def fail(message):
 manifest = json.loads((PACK / "manifest.json").read_text())
 sources = json.loads((PACK / "sources.json").read_text())
 
-for key in ("serverResourcePack", "serverResourcePackUrl"):
+for key in ("serverResourcePack", "serverResourcePackUrl", "crashReportDsn"):
     if key in manifest and not manifest[key].startswith("https://"):
         fail(f"{key} must be an https URL")
     if manifest.get(key) != sources.get(key):

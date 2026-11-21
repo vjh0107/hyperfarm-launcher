@@ -157,8 +157,12 @@ pub fn edit(
 // 26.3 의 기본(default) 백엔드는 OpenGL 을 먼저 고른다. AMD 의 OpenGL 드라이버(atio6axx.dll)는 서버 팩으로 텍스처
 // 아틀라스를 만든 직후 0xC0000005 로 게임을 죽이고(RX 6600·6800, 런처 없이 바닐라로 켜도 같다), Vulkan 은 그 드라이버를
 // 거치지 않는다. 플레이어가 OpenGL 이나 Vulkan 을 직접 고른 값은 두고 default 일 때만 바꾼다. Iris 는 Vulkan 에서 꺼진다
+pub fn prefers_vulkan(display_adapter_vendors: Option<&str>) -> bool {
+    display_adapter_vendors.is_some_and(mentions_amd)
+}
+
 #[cfg(windows)]
-pub async fn amd_display_adapter() -> bool {
+pub async fn display_adapter_vendors() -> Option<String> {
     use std::process::Stdio;
     let powershell = std::env::var_os("SystemRoot")
         .map_or_else(|| r"C:\Windows".into(), std::path::PathBuf::from)
@@ -178,35 +182,38 @@ pub async fn amd_display_adapter() -> bool {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
             log::warn!("Could not list the display adapters: {error}");
-            return false;
+            return None;
         }
         Err(_) => {
             log::warn!("Listing the display adapters took longer than {ADAPTER_QUERY_TIMEOUT:?}");
-            return false;
+            return None;
         }
     };
-    let vendors = String::from_utf8_lossy(&output.stdout);
-    if vendors.trim().is_empty() {
+    let vendors = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if vendors.is_empty() {
         log::warn!(
             "Listing the display adapters gave nothing ({}): {}",
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         );
-        return false;
+        return None;
     }
-    mentions_amd(&vendors)
+    Some(vendors)
 }
 
 #[cfg(not(windows))]
-pub async fn amd_display_adapter() -> bool {
-    false
+pub async fn display_adapter_vendors() -> Option<String> {
+    None
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 fn mentions_amd(providers: &str) -> bool {
     providers
         .lines()
         .any(|line| line.contains("Advanced Micro Devices"))
+}
+
+pub fn graphics_backend(contents: &str) -> Option<&str> {
+    option(contents, GRAPHICS_BACKEND).map(|value| value.trim_matches('"'))
 }
 
 // 26.3 은 입력을 SDL 로 받으면서 키를 정하지 않은 동작을 Fn·IME 전환 같은 알 수 없는 키에도 일으킨다(MC-311949,
