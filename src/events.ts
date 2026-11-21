@@ -12,10 +12,17 @@ export type Problem =
   | "UNSUPPORTED_PLATFORM"
   | "GAME_EXITED";
 
+export interface Crash {
+  code: number | null;
+  hex: string | null;
+  report: string | null;
+}
+
 export interface LauncherError {
   problem: Problem;
   message: string;
   disk?: { neededBytes: number; usableBytes: number };
+  crash?: Crash;
 }
 
 export type LaunchEvent =

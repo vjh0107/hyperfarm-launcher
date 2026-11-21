@@ -3,13 +3,12 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import type { AppInfo, LaunchEvent, LauncherError, LauncherSettings, Step, UpdateEvent } from "./events";
+import type { AppInfo, Crash, LaunchEvent, LauncherError, LauncherSettings, Step, UpdateEvent } from "./events";
 import { bytes, remaining, summary, type PackSummary } from "./format";
-import { accountRows, errorScreen, loginScreen, ProgressScreen, settingsScreen, type Chrome, type ErrorContent } from "./screens";
+import { accountRows, crashScreen, errorScreen, loginScreen, ProgressScreen, settingsScreen, type Chrome, type ErrorContent } from "./screens";
 
 const WIDTH = 480;
 const HEIGHT = 320;
-const SETTINGS_HEIGHT = 440;
 const SAMPLE_MS = 500;
 
 const appWindow = getCurrentWindow();
@@ -36,8 +35,7 @@ function show(screen: HTMLElement): void {
   screen.classList.remove("leaving");
   container.append(screen);
   current = screen;
-  const height = screen.classList.contains("settings") ? SETTINGS_HEIGHT : HEIGHT;
-  void appWindow.setSize(new LogicalSize(WIDTH, height));
+  void appWindow.setSize(new LogicalSize(WIDTH, Number(screen.dataset.height ?? HEIGHT)));
 }
 
 function run(step: Step): void {
@@ -140,6 +138,20 @@ function errorContent(error: LauncherError): ErrorContent {
   }
 }
 
+// 복사는 클릭 안에서 곧바로 해야 WebKit 이 받아 주므로, 붙여 넣을 글은 화면을 그리기 전에 받아 둔다
+async function showCrash(crash: Crash): Promise<void> {
+  const details = await invoke<string | null>("crash_details");
+  show(
+    crashScreen(chrome, crash, {
+      openLogs: () => void invoke("open_log_folder"),
+      openReport: () => void invoke("open_crash_report"),
+      copy: () => (details === null ? Promise.reject(new Error("no crash to copy")) : navigator.clipboard.writeText(details)),
+      close: chrome.close,
+      restart: () => run("play"),
+    }),
+  );
+}
+
 async function changeFolder(): Promise<void> {
   const chosen = await invoke<string | null>("choose_game_directory");
   if (chosen) {
@@ -218,7 +230,8 @@ function onLaunch(event: LaunchEvent): void {
       break;
     case "failed":
       ticker.stop();
-      show(errorScreen(chrome, errorContent(event.error)));
+      if (event.error.crash) void showCrash(event.error.crash);
+      else show(errorScreen(chrome, errorContent(event.error)));
       break;
     case "mismatch":
       ticker.stop();
@@ -259,11 +272,16 @@ async function start(): Promise<void> {
     () => void invoke("run_step", { step: "play" satisfies Step }),
   );
   progress.setVersion(info.version);
-  progress.checking("");
-  show(progress.root);
+  const crash = await invoke<Crash | null>("crash");
+  if (crash) {
+    await showCrash(crash);
+  } else {
+    progress.checking("");
+    show(progress.root);
+  }
   await listen<LaunchEvent>("launch", ({ payload }) => onLaunch(payload));
   await listen<UpdateEvent>("update", ({ payload }) => onUpdate(payload));
-  await invoke("begin");
+  if (!crash) await invoke("begin");
 }
 
 document.addEventListener("contextmenu", (event) => event.preventDefault());

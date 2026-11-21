@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::crash::Crash;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Problem {
@@ -32,6 +34,8 @@ pub struct LauncherError {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk: Option<DiskSpace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash: Option<Crash>,
 }
 
 impl LauncherError {
@@ -40,6 +44,14 @@ impl LauncherError {
             problem,
             message: message.into(),
             disk: None,
+            crash: None,
+        }
+    }
+
+    pub fn crashed(crash: Crash) -> Self {
+        Self {
+            crash: Some(crash),
+            ..Self::new(Problem::GameExited, "게임이 시작하자마자 꺼졌어요.")
         }
     }
 
@@ -55,6 +67,7 @@ impl LauncherError {
                 needed_bytes,
                 usable_bytes,
             }),
+            crash: None,
         }
     }
 }

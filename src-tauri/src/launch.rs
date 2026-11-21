@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use regex_lite::{Captures, Regex};
 use tokio::process::{Child, Command};
 
 use crate::auth::MinecraftSession;
+use crate::crash::Crash;
 use crate::error::{LauncherError, Problem};
 use crate::install::Installation;
 use crate::install::rules::{Platform, resolve_arguments};
@@ -24,6 +25,12 @@ const GC_ARGUMENTS: [&str; 4] = [
     "-XX:+UseStringDeduplication",
     "-XX:+UseZGC",
 ];
+
+pub struct GameProcess {
+    pub child: Child,
+    pub started: SystemTime,
+    pub directory: PathBuf,
+}
 
 pub struct LaunchOptions<'a> {
     pub memory_megabytes: u32,
@@ -108,7 +115,7 @@ pub async fn start(
     working_directory: &Path,
     log: PathBuf,
     timeout: Duration,
-) -> Result<Child, LauncherError> {
+) -> Result<GameProcess, LauncherError> {
     let failed = |error: std::io::Error| {
         log::warn!("Could not start the game: {error}");
         LauncherError::new(Problem::GameExited, "게임을 실행하지 못했어요.")
@@ -128,18 +135,17 @@ pub async fn start(
         .stderr(errors);
     #[cfg(windows)]
     process.creation_flags(0x0800_0000);
+    let started = SystemTime::now();
     let mut child = process.spawn().map_err(failed)?;
 
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some(status)) = child.try_wait() {
-            let code = status
-                .code()
-                .map_or_else(|| "알 수 없음".to_string(), |code| code.to_string());
-            return Err(LauncherError::new(
-                Problem::GameExited,
-                format!("게임이 시작하자마자 꺼졌어요. (코드 {code})"),
-            ));
+            return Err(LauncherError::crashed(Crash::detect(
+                status.code(),
+                working_directory,
+                started,
+            )));
         }
         if tokio::fs::read(&log)
             .await
@@ -149,7 +155,11 @@ pub async fn start(
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
-    Ok(child)
+    Ok(GameProcess {
+        child,
+        started,
+        directory: working_directory.to_path_buf(),
+    })
 }
 
 #[cfg(test)]

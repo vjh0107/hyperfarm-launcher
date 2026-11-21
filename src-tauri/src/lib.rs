@@ -1,4 +1,5 @@
 mod auth;
+mod crash;
 mod error;
 mod flow;
 mod http;
@@ -14,15 +15,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
-use tokio::process::Child;
 
+use crash::Crash;
 use flow::{LaunchEvent, LaunchFlow, Step};
 use install::options::WorkArea;
+use launch::GameProcess;
 use settings::{LauncherConfig, LauncherSettings};
 
 const LAUNCH_EVENT: &str = "launch";
@@ -59,26 +61,53 @@ enum UpdateEvent {
 }
 
 #[derive(Default)]
-struct Game(Mutex<Option<Child>>);
+struct Game {
+    process: Mutex<Option<GameProcess>>,
+    crash: Mutex<Option<Crash>>,
+}
 
 impl Game {
-    fn start(&self, child: Child) {
-        *self.0.lock().unwrap() = Some(child);
+    fn start(&self, process: GameProcess) {
+        *self.process.lock().unwrap() = Some(process);
     }
 
-    // 플래그가 아니라 프로세스를 본다. 기다리던 쪽이 어떤 길로 멈춰도 꺼진 게임이 다음 실행을 막지 않는다
+    // 플래그가 아니라 프로세스를 본다. 기다리던 쪽이 어떤 길로 멈춰도 꺼진 게임이 다음 실행을 막지 않는다.
+    // 링크나 종료 요청이 먼저 물어 꺼진 것을 알게 되어도 크래시는 여기 남아 기다리던 쪽이 가져간다
     fn is_running(&self) -> bool {
-        let mut game = self.0.lock().unwrap();
-        let Some(child) = game.as_mut() else {
+        let mut game = self.process.lock().unwrap();
+        let Some(process) = game.as_mut() else {
             return false;
         };
-        match child.try_wait() {
+        match process.child.try_wait() {
             Ok(None) => return true,
-            Ok(Some(status)) => log::info!("The game exited with {status}"),
+            Ok(Some(status)) if status.code() == Some(0) => {
+                log::info!("The game exited with {status}");
+            }
+            Ok(Some(status)) => {
+                *self.crash.lock().unwrap() = Some(Crash::detect(
+                    status.code(),
+                    &process.directory,
+                    process.started,
+                ));
+            }
             Err(error) => log::warn!("Could not check on the game process: {error}"),
         }
         *game = None;
         false
+    }
+
+    // 창이 없어도 런처가 남아 있어야 하는 동안이다. is_running 이 꺼진 게임을 거두며 크래시를 남기므로 그것을 먼저
+    // 물어야 한다. 크래시를 먼저 보면 그 사이 거둔 크래시를 놓치고 런처가 화면 없이 끝난다
+    fn keeps_launcher_open(&self) -> bool {
+        self.is_running() || self.crash.lock().unwrap().is_some()
+    }
+
+    fn crash(&self) -> Option<Crash> {
+        self.crash.lock().unwrap().clone()
+    }
+
+    fn forget_crash(&self) {
+        self.crash.lock().unwrap().take();
     }
 }
 
@@ -119,8 +148,9 @@ async fn run_step(app: AppHandle, step: Step, flow: State<'_, Flow>) -> Result<(
     Ok(())
 }
 
-// 창은 닫고 게임이 도는 동안 남아 Discord 에 플레이 중을 띄운다. 게임이 꺼지면 함께 꺼진다
-fn stay_while_playing(app: &AppHandle, game: Option<Child>) {
+// 창은 닫고 게임이 도는 동안 남아 Discord 에 플레이 중을 띄운다. 게임이 제대로 꺼지면 함께 꺼지고, 크래시면 창을 다시
+// 띄워 알린다
+fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
     let Some(game) = game else {
         return;
     };
@@ -140,8 +170,77 @@ fn stay_while_playing(app: &AppHandle, game: Option<Child>) {
             check.tick().await;
         }
         presence.abort();
-        app.exit(0);
+        match app.state::<Game>().crash() {
+            Some(crash) => show_crash(&app, crash),
+            None => app.exit(0),
+        }
     });
+}
+
+// 창을 다시 만들면 화면은 처음부터 다시 읽히므로, 이벤트가 아니라 화면이 뜨면서 묻는 crash 명령으로 넘긴다.
+// Game 의 크래시는 창을 띄운 뒤에 비운다. 그 전에 비우면 창이 없는 사이의 종료 요청이 런처를 끝낸다
+fn show_crash(app: &AppHandle, crash: Crash) {
+    app.state::<Flow>().record_crash(crash);
+    #[cfg(target_os = "macos")]
+    if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+        log::warn!("Could not bring the launcher back to the Dock: {error}");
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .expect("tauri.conf.json declares the main window");
+    match WebviewWindowBuilder::from_config(app, config).and_then(|builder| builder.build()) {
+        Ok(window) => {
+            app.state::<Game>().forget_crash();
+            if let Err(error) = window.set_focus() {
+                log::warn!("Could not focus the crash window: {error}");
+            }
+        }
+        Err(error) => {
+            log::warn!("Could not reopen the launcher window after the crash: {error}");
+            app.exit(0);
+        }
+    }
+}
+
+#[tauri::command]
+fn crash(flow: State<'_, Flow>) -> Option<Crash> {
+    flow.crash()
+}
+
+#[tauri::command]
+fn crash_details(flow: State<'_, Flow>) -> Option<String> {
+    flow.crash()
+        .map(|crash| crash.details(env!("CARGO_PKG_VERSION")))
+}
+
+#[tauri::command]
+fn open_crash_report(app: AppHandle, flow: State<'_, Flow>) {
+    let Some(crash) = flow.crash() else {
+        return;
+    };
+    let Some(report) = crash.report_path() else {
+        return;
+    };
+    if let Err(error) = app
+        .opener()
+        .open_path(report.to_string_lossy(), None::<&str>)
+    {
+        log::warn!("Could not open the crash report: {error}");
+    }
+}
+
+#[tauri::command]
+fn open_log_folder(app: AppHandle, flow: State<'_, Flow>) {
+    if let Err(error) = app
+        .opener()
+        .open_path(flow.log_folder().to_string_lossy(), None::<&str>)
+    {
+        log::warn!("Could not open the game log folder: {error}");
+    }
 }
 
 #[tauri::command]
@@ -405,9 +504,10 @@ pub fn run() {
             }
             let linked = handle.clone();
             app.deep_link().on_open_url(move |event| {
-                // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다
-                if linked.state::<Game>().is_running() {
-                    log::info!("Ignoring a launch link while the game is running");
+                // 같은 계정으로 하나 더 켜면 먼저 켠 게임이 서버에서 끊긴다. 크래시 화면을 띄우는 사이에 받으면 그 실행이
+                // 크래시를 지워 새 창이 크래시 대신 빈 화면을 그린다
+                if linked.state::<Game>().keeps_launcher_open() {
+                    log::info!("Ignoring a launch link while the game is running or its crash is not shown yet");
                     return;
                 }
                 if !accept_links(&linked, event.urls().into_iter().map(String::from)) {
@@ -440,6 +540,10 @@ pub fn run() {
             open_xbox_profile,
             choose_game_directory,
             quit,
+            crash,
+            crash_details,
+            open_crash_report,
+            open_log_folder,
         ])
         .build(tauri::generate_context!())
         .expect("the launcher window failed to start")
@@ -447,7 +551,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = event
-                && app.state::<Game>().is_running()
+                && app.state::<Game>().keeps_launcher_open()
             {
                 api.prevent_exit();
             }
@@ -456,47 +560,100 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
-    use super::{Game, Startup, release_summary, startup};
+    use super::{Game, GameProcess, Startup, release_summary, startup};
 
-    fn sleeping_process() -> tokio::process::Child {
+    fn process(directory: &Path, script: &str) -> GameProcess {
         #[cfg(windows)]
         let mut command = {
             let mut command = tokio::process::Command::new("powershell");
-            command.args(["-NoProfile", "-Command", "Start-Sleep 30"]);
+            command.args(["-NoProfile", "-Command", script]);
             command
         };
         #[cfg(not(windows))]
         let mut command = {
-            let mut command = tokio::process::Command::new("sleep");
-            command.arg("30");
+            let mut command = tokio::process::Command::new("sh");
+            command.args(["-c", script]);
             command
         };
-        command.kill_on_drop(true).spawn().unwrap()
+        GameProcess {
+            child: command.kill_on_drop(true).spawn().unwrap(),
+            started: SystemTime::now(),
+            directory: directory.to_path_buf(),
+        }
     }
 
-    #[tokio::test]
-    async fn stops_counting_the_game_as_running_once_its_process_is_gone() {
-        let game = Game::default();
-        assert!(!game.is_running());
-        game.start(sleeping_process());
-        assert!(game.is_running());
-
-        game.0
-            .lock()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .start_kill()
-            .unwrap();
+    async fn wait_until_stopped(game: &Game) {
         tokio::time::timeout(Duration::from_secs(10), async {
             while game.is_running() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
         .await
-        .expect("the killed game still counts as running");
+        .expect("the finished game still counts as running");
+    }
+
+    #[tokio::test]
+    async fn stops_counting_the_game_as_running_once_its_process_is_gone() {
+        let directory = tempfile::tempdir().unwrap();
+        let game = Game::default();
+        assert!(!game.is_running());
+        #[cfg(windows)]
+        game.start(process(directory.path(), "Start-Sleep 30"));
+        #[cfg(not(windows))]
+        game.start(process(directory.path(), "sleep 30"));
+        assert!(game.is_running());
+
+        game.process
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .child
+            .start_kill()
+            .unwrap();
+        wait_until_stopped(&game).await;
+        let crash = serde_json::to_value(game.crash().expect("a killed game is a crash")).unwrap();
+        if cfg!(unix) {
+            assert!(crash["code"].is_null());
+        }
+    }
+
+    #[tokio::test]
+    async fn closes_quietly_after_a_clean_exit_and_keeps_the_crash_of_any_other() {
+        let directory = tempfile::tempdir().unwrap();
+        let game = Game::default();
+
+        game.start(process(directory.path(), "exit 0"));
+        wait_until_stopped(&game).await;
+        assert!(game.crash().is_none());
+
+        game.start(process(directory.path(), "exit 3"));
+        wait_until_stopped(&game).await;
+        assert!(!game.is_running());
+        let crash = serde_json::to_value(game.crash().expect("exit 3 is a crash")).unwrap();
+        assert_eq!(crash["code"], 3);
+    }
+
+    #[tokio::test]
+    async fn keeps_the_launcher_open_until_a_crash_nobody_reaped_yet_is_shown() {
+        let directory = tempfile::tempdir().unwrap();
+        let game = Game::default();
+        game.start(process(directory.path(), "exit 3"));
+        let mut exited = game.process.lock().unwrap().take().unwrap();
+        exited.child.wait().await.unwrap();
+        game.start(exited);
+
+        assert!(game.keeps_launcher_open());
+        assert!(game.keeps_launcher_open());
+        game.forget_crash();
+        assert!(!game.keeps_launcher_open());
+
+        game.start(process(directory.path(), "exit 0"));
+        wait_until_stopped(&game).await;
+        assert!(!game.keeps_launcher_open());
     }
 
     #[test]

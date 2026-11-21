@@ -519,6 +519,16 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.text-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pill.aside {
+  margin-right: auto;
+}
+
 .settings {
   background: #f2f5f9;
 }

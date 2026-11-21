@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tokio::process::Child;
 use tokio::sync::Notify;
 
 use crate::auth::microsoft::{BrowserOpener, MicrosoftClient, MicrosoftEndpoints};
 use crate::auth::store::KeyringAccountStore;
 use crate::auth::xbox::{XboxClient, XboxEndpoints};
 use crate::auth::{AuthError, Authenticator, MinecraftSession};
+use crate::crash::Crash;
 use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
@@ -20,7 +20,7 @@ use crate::install::rules::Platform;
 use crate::install::{
     DownloadPlan, GameInstaller, GameLayout, InstallListener, Installation, pack,
 };
-use crate::launch::{self, LaunchOptions};
+use crate::launch::{self, GameProcess, LaunchOptions};
 use crate::settings::{CLIENT_ID, LauncherConfig, LauncherSettings, SettingsStore};
 use crate::ticket::{self, LaunchTicket};
 
@@ -107,7 +107,7 @@ struct Prepared {
 
 enum Outcome {
     Ready(String),
-    Started(Child),
+    Started(Box<GameProcess>),
 }
 
 #[derive(Default)]
@@ -142,6 +142,7 @@ pub struct LaunchFlow {
     ticket: Mutex<Option<LaunchTicket>>,
     mismatched: Mutex<Option<MinecraftSession>>,
     prepared: Mutex<Option<Prepared>>,
+    crash: Mutex<Option<Crash>>,
     sign_outs: AtomicU64,
     sign_in_url: Arc<Mutex<Option<String>>>,
 }
@@ -183,6 +184,7 @@ impl LaunchFlow {
             ticket: Mutex::new(None),
             mismatched: Mutex::new(None),
             prepared: Mutex::new(None),
+            crash: Mutex::new(None),
             sign_outs: AtomicU64::new(0),
             sign_in_url: Arc::new(Mutex::new(None)),
         }
@@ -224,17 +226,18 @@ impl LaunchFlow {
         self.busy.hold()
     }
 
-    pub async fn run(&self, step: Step) -> Option<Child> {
+    pub async fn run(&self, step: Step) -> Option<GameProcess> {
         let Some(held) = self.busy.hold() else {
             log::info!("The launcher is busy; ignoring {step:?}");
             return None;
         };
+        self.crash.lock().unwrap().take();
         let mut game = None;
         let sign_outs = self.sign_outs.load(Ordering::SeqCst);
         let event = match self.advance(step, sign_outs).await {
             Ok(Outcome::Ready(server)) => LaunchEvent::Ready { server },
-            Ok(Outcome::Started(child)) => {
-                game = Some(child);
+            Ok(Outcome::Started(process)) => {
+                game = Some(*process);
                 LaunchEvent::Launched
             }
             Err(AuthError::Mismatch {
@@ -266,6 +269,7 @@ impl LaunchFlow {
             }
             Err(AuthError::Failed(error)) => {
                 log::warn!("Launch stopped with {:?}: {}", error.problem, error.message);
+                self.crash.lock().unwrap().clone_from(&error.crash);
                 LaunchEvent::Failed { error }
             }
         };
@@ -305,8 +309,21 @@ impl LaunchFlow {
         self.total_memory_bytes
     }
 
+    // 크래시 화면의 보고서 열기와 정보 복사가 읽는 자리다. 화면은 경로를 넘기지 않는다
+    pub fn record_crash(&self, crash: Crash) {
+        *self.crash.lock().unwrap() = Some(crash);
+    }
+
+    pub fn crash(&self) -> Option<Crash> {
+        self.crash.lock().unwrap().clone()
+    }
+
     pub fn game_log(&self) -> PathBuf {
-        GameLayout::new(self.game_directory()).logs().join(GAME_LOG)
+        self.log_folder().join(GAME_LOG)
+    }
+
+    pub fn log_folder(&self) -> PathBuf {
+        GameLayout::new(self.game_directory()).logs()
     }
 
     pub fn game_directory(&self) -> PathBuf {
@@ -345,7 +362,9 @@ impl LaunchFlow {
             *self.prepared.lock().unwrap() = Some(prepared);
             return Ok(Outcome::Ready(server));
         }
-        self.start(prepared).await.map(Outcome::Started)
+        self.start(prepared)
+            .await
+            .map(|process| Outcome::Started(Box::new(process)))
     }
 
     fn signed_out_since(&self, sign_outs: u64) -> bool {
@@ -424,7 +443,7 @@ impl LaunchFlow {
     }
 
     // 메모리와 options.txt 는 시작 버튼을 누른 때의 것을 쓴다. 기다리는 동안 설정에서 바꾼 메모리가 그대로 들어간다
-    async fn start(&self, prepared: Prepared) -> Result<Child, AuthError> {
+    async fn start(&self, prepared: Prepared) -> Result<GameProcess, AuthError> {
         let Prepared {
             session,
             installation,

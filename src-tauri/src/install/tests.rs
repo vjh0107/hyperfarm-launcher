@@ -286,8 +286,8 @@ async fn installs_and_opens_the_game_window() {
     )
     .await
     .unwrap();
-    assert!(game.try_wait().unwrap().is_none());
-    game.kill().await.unwrap();
+    assert!(game.child.try_wait().unwrap().is_none());
+    game.child.kill().await.unwrap();
 }
 
 fn uuid_like() -> String {
