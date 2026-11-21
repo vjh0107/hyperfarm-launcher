@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use regex_lite::Regex;
 use serde::Deserialize;
 use serde_json::Value;
+
+pub const WINDOWS_JAVA: &str = "javaw.exe";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Platform {
@@ -51,11 +54,11 @@ impl Platform {
         })
     }
 
-    pub fn java_executable(&self) -> &'static str {
+    pub fn java_executable(&self) -> PathBuf {
         match self.os_name {
-            Self::OSX => "jre.bundle/Contents/Home/bin/java",
-            Self::WINDOWS => "bin/javaw.exe",
-            _ => "bin/java",
+            Self::OSX => PathBuf::from("jre.bundle/Contents/Home/bin/java"),
+            Self::WINDOWS => Path::new("bin").join(WINDOWS_JAVA),
+            _ => PathBuf::from("bin/java"),
         }
     }
 

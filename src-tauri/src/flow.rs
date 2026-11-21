@@ -16,7 +16,7 @@ use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
 use crate::install::options::{self, WorkArea};
-use crate::install::rules::Platform;
+use crate::install::rules::{Platform, WINDOWS_JAVA};
 use crate::install::{
     DownloadPlan, GameInstaller, GameLayout, InstallListener, Installation, pack,
 };
@@ -360,7 +360,7 @@ impl LaunchFlow {
                 "A game (pid {pid}) is still running in {}",
                 directory.display()
             );
-            return Err(LauncherError::new(Problem::GameRunning, GAME_RUNNING).into());
+            return Err(game_running().into());
         }
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
@@ -551,6 +551,18 @@ impl LaunchFlow {
             }
         }
     }
+}
+
+// Windows 의 게임은 콘솔 없는 javaw 로 떠서 창 없이 멈추면 끌 자리가 작업 관리자의 세부 정보뿐이다
+fn game_running() -> LauncherError {
+    let message = if cfg!(windows) {
+        format!(
+            "{GAME_RUNNING} 창이 보이지 않으면 작업 관리자의 세부 정보에서 {WINDOWS_JAVA} 를 끝내 주세요."
+        )
+    } else {
+        GAME_RUNNING.to_string()
+    };
+    LauncherError::new(Problem::GameRunning, message)
 }
 
 // 남의 .minecraft 를 그대로 게임 루트로 쓰면 manifest 에 없는 모드를 지우는 정리가 그 사람의 모드를 지운다.
