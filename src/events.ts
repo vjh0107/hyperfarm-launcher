@@ -10,6 +10,7 @@ export type Problem =
   | "CORRUPT_DOWNLOAD"
   | "PACK_INVALID"
   | "UNSUPPORTED_PLATFORM"
+  | "GAME_RUNNING"
   | "GAME_EXITED";
 
 export interface Crash {

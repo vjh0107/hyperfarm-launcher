@@ -29,6 +29,7 @@ const WINDOW_TIMEOUT: Duration = Duration::from_secs(120);
 // 끝나거나 새 모드 구성이 게시되면, 그 준비로 켠 게임은 접속하지 못하거나 옛 모드로 들어간다
 const PREPARED_FOR: Duration = Duration::from_secs(60 * 60);
 const SIGNED_OUT: &str = "로그아웃했어요. 다시 시도하면 로그인부터 해요.";
+const GAME_RUNNING: &str = "켜져 있는 게임을 끈 뒤 다시 시도해 주세요.";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const GAME_LOG: &str = "launcher-game.log";
 const SESSION_PROFILE: &str = "https://sessionserver.mojang.com/session/minecraft/profile/";
@@ -351,6 +352,16 @@ impl LaunchFlow {
     }
 
     async fn advance(&self, step: Step, sign_outs: u64) -> Result<Outcome, AuthError> {
+        // launcher 가 지켜보지 않는 게임이 이 폴더에서 돌면, Windows 는 그 게임이 쥔 옛 jar 를 지우지 못해 백신 탓으로 안내하고
+        // 하나 더 켜면 같은 계정의 먼저 켠 게임이 서버에서 끊긴다
+        let directory = self.game_directory();
+        if let Some(pid) = launch::running_in(&directory) {
+            log::info!(
+                "A game (pid {pid}) is still running in {}",
+                directory.display()
+            );
+            return Err(LauncherError::new(Problem::GameRunning, GAME_RUNNING).into());
+        }
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
             Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {

@@ -16,6 +16,7 @@ pub enum Problem {
     CorruptDownload,
     PackInvalid,
     UnsupportedPlatform,
+    GameRunning,
     GameExited,
 }
 

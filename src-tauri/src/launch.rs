@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime};
 
 use regex_lite::{Captures, Regex};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::process::{Child, Command};
 
 use crate::auth::MinecraftSession;
@@ -26,6 +28,8 @@ const GC_ARGUMENTS: [&str; 4] = [
     "-XX:+UseStringDeduplication",
     "-XX:+UseZGC",
 ];
+// 판의 게임 인자가 ${game_directory} 앞에 두는 이름이다. launcher 가 붙이는 것이 아니라 옛 판이 켠 게임에도 있다
+const GAME_DIRECTORY_ARGUMENT: &str = "--gameDir";
 
 pub struct GameProcess {
     pub child: Child,
@@ -169,9 +173,167 @@ pub async fn start(
     })
 }
 
+// launcher 가 꺼진 뒤에도 남은 게임은 mods 의 jar 를 쥔 채 돈다. 다른 launcher 로 켠 게임은 다른 폴더를 --gameDir 로 받는다.
+// 명령줄에는 액세스 토큰이 들어 있으므로 로그에는 pid 만 남긴다
+pub fn running_in(game_directory: &Path) -> Option<Pid> {
+    let mut system = match System::new() {
+        Ok(system) => system,
+        Err(error) => {
+            log::warn!("Could not list processes to look for a running game: {error}");
+            return None;
+        }
+    };
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    system
+        .processes()
+        .values()
+        .find(|process| launched_in(process.cmd(), game_directory))
+        .map(sysinfo::Process::pid)
+}
+
+fn launched_in(command: &[impl AsRef<OsStr>], game_directory: &Path) -> bool {
+    command.windows(2).any(|pair| {
+        pair[0].as_ref() == GAME_DIRECTORY_ARGUMENT
+            && same_directory(Path::new(pair[1].as_ref()), game_directory)
+    })
+}
+
+// Windows 는 대소문자와 구분자가, macOS 는 링크(/var 와 /private/var)가 달라도 같은 폴더라 글자로만 견주면 놓친다
+fn same_directory(left: &Path, right: &Path) -> bool {
+    left == right
+        || matches!(
+            (std::fs::canonicalize(left), std::fs::canonicalize(right)),
+            (Ok(left), Ok(right)) if left == right
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn installation(game_directory: &Path) -> Installation {
+        Installation {
+            java: PathBuf::from("java"),
+            classpath: Vec::new(),
+            main_class: "net.fabricmc.loader.impl.launch.knot.KnotClient".into(),
+            jvm_arguments: Vec::new(),
+            game_arguments: vec![crate::install::rules::Argument {
+                rules: Vec::new(),
+                values: [
+                    "--username",
+                    "${auth_player_name}",
+                    "--gameDir",
+                    "${game_directory}",
+                    "--accessToken",
+                    "${auth_access_token}",
+                ]
+                .map(String::from)
+                .to_vec(),
+            }],
+            version_name: "fabric-loader-0.20.1-26.3".into(),
+            version_type: "release".into(),
+            asset_index: "30".into(),
+            assets_root: PathBuf::from("assets"),
+            libraries_root: PathBuf::from("libraries"),
+            natives: PathBuf::from("natives"),
+            game_directory: game_directory.to_path_buf(),
+            server: "hyperf.kr".into(),
+        }
+    }
+
+    fn session() -> MinecraftSession {
+        MinecraftSession {
+            access_token: "token".into(),
+            player_id: "id".into(),
+            name: "name".into(),
+            xuid: "0".into(),
+        }
+    }
+
+    fn options() -> LaunchOptions<'static> {
+        LaunchOptions {
+            memory_megabytes: 4096,
+            client_id: "client",
+            launcher_version: "test",
+        }
+    }
+
+    #[test]
+    fn finds_the_game_it_launched_into_this_folder_and_no_other() {
+        let ours = tempfile::tempdir().unwrap();
+        let vanilla = tempfile::tempdir().unwrap();
+        let command = |directory: &Path| {
+            command(
+                &installation(directory),
+                &session(),
+                &options(),
+                &Platform::current(),
+            )
+        };
+
+        assert!(launched_in(&command(ours.path()), ours.path()));
+        assert!(!launched_in(&command(vanilla.path()), ours.path()));
+        let mentions_the_folder_elsewhere = [
+            "java".into(),
+            format!("-Djava.library.path={}", ours.path().display()),
+            "--assetsDir".into(),
+            ours.path().display().to_string(),
+        ];
+        assert!(!launched_in(&mentions_the_folder_elsewhere, ours.path()));
+    }
+
+    #[tokio::test]
+    async fn finds_a_running_process_by_the_folder_it_was_given() {
+        let ours = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("powershell");
+            // -Command 는 뒤의 인자를 모두 이어 명령으로 읽으므로 # 로 주석이 되게 한다
+            command.args(["-NoProfile", "-Command", "Start-Sleep 30 #"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("sh");
+            // 명령이 sleep 하나뿐이면 sh 가 sleep 으로 exec 해 --gameDir 가 명령줄에서 사라진다
+            command.args(["-c", "sleep 30; exit 0", "sh"]);
+            command
+        };
+        let game = command
+            .arg("--gameDir")
+            .arg(ours.path())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_u32(game.id().unwrap());
+
+        let found = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(found) = running_in(ours.path()) {
+                    return found;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the running game was not found");
+        assert_eq!(found, pid);
+        assert_eq!(running_in(elsewhere.path()), None);
+    }
+
+    #[test]
+    fn recognizes_the_folder_however_its_path_was_spelled() {
+        let ours = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(ours.path().join("mods")).unwrap();
+        let spelled = ours.path().join("mods").join("..");
+        let command = [OsStr::new("--gameDir"), spelled.as_os_str()];
+        assert!(launched_in(&command, ours.path()));
+    }
 
     #[test]
     fn starts_the_heap_no_larger_than_its_limit() {
@@ -182,33 +344,8 @@ mod tests {
 
     #[test]
     fn tells_the_fabric_loader_to_exit_instead_of_opening_its_error_window() {
-        let installation = Installation {
-            java: PathBuf::from("java"),
-            classpath: Vec::new(),
-            main_class: "net.fabricmc.loader.impl.launch.knot.KnotClient".into(),
-            jvm_arguments: Vec::new(),
-            game_arguments: Vec::new(),
-            version_name: "fabric-loader-0.20.1-26.3".into(),
-            version_type: "release".into(),
-            asset_index: "30".into(),
-            assets_root: PathBuf::from("assets"),
-            libraries_root: PathBuf::from("libraries"),
-            natives: PathBuf::from("natives"),
-            game_directory: PathBuf::from("."),
-            server: "hyperf.kr".into(),
-        };
-        let session = MinecraftSession {
-            access_token: "token".into(),
-            player_id: "id".into(),
-            name: "name".into(),
-            xuid: "0".into(),
-        };
-        let options = LaunchOptions {
-            memory_megabytes: 4096,
-            client_id: "client",
-            launcher_version: "test",
-        };
-        let command = command(&installation, &session, &options, &Platform::current());
+        let installation = installation(Path::new("."));
+        let command = command(&installation, &session(), &options(), &Platform::current());
         let property = command
             .iter()
             .position(|argument| argument == "-Dfabric.noGui=true")
