@@ -16,7 +16,7 @@ use crate::error::{LauncherError, Problem};
 use crate::http::Http;
 use crate::install::download::Progress;
 use crate::install::options::{self, WorkArea};
-use crate::install::rules::Platform;
+use crate::install::rules::{Platform, WINDOWS_JAVA};
 use crate::install::{
     DownloadPlan, GameInstaller, GameLayout, InstallListener, Installation, pack,
 };
@@ -29,6 +29,7 @@ const WINDOW_TIMEOUT: Duration = Duration::from_secs(120);
 // 끝나거나 새 모드 구성이 게시되면, 그 준비로 켠 게임은 접속하지 못하거나 옛 모드로 들어간다
 const PREPARED_FOR: Duration = Duration::from_secs(60 * 60);
 const SIGNED_OUT: &str = "로그아웃했어요. 다시 시도하면 로그인부터 해요.";
+const GAME_RUNNING: &str = "켜져 있는 게임을 끈 뒤 다시 시도해 주세요.";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const GAME_LOG: &str = "launcher-game.log";
 const SESSION_PROFILE: &str = "https://sessionserver.mojang.com/session/minecraft/profile/";
@@ -351,6 +352,16 @@ impl LaunchFlow {
     }
 
     async fn advance(&self, step: Step, sign_outs: u64) -> Result<Outcome, AuthError> {
+        // launcher 가 지켜보지 않는 게임이 이 폴더에서 돌면, Windows 는 그 게임이 쥔 옛 jar 를 지우지 못해 백신 탓으로 안내하고
+        // 하나 더 켜면 같은 계정의 먼저 켠 게임이 서버에서 끊긴다
+        let directory = self.game_directory();
+        if let Some(pid) = launch::running_in(&directory) {
+            log::info!(
+                "A game (pid {pid}) is still running in {}",
+                directory.display()
+            );
+            return Err(game_running().into());
+        }
         let kept = self.prepared.lock().unwrap().take();
         let prepared = match kept {
             Some(prepared) if step == Step::Play && prepared.at.elapsed() < PREPARED_FOR => {
@@ -540,6 +551,18 @@ impl LaunchFlow {
             }
         }
     }
+}
+
+// Windows 의 게임은 콘솔 없는 javaw 로 떠서 창 없이 멈추면 끌 자리가 작업 관리자의 세부 정보뿐이다
+fn game_running() -> LauncherError {
+    let message = if cfg!(windows) {
+        format!(
+            "{GAME_RUNNING} 창이 보이지 않으면 작업 관리자의 세부 정보에서 {WINDOWS_JAVA} 를 끝내 주세요."
+        )
+    } else {
+        GAME_RUNNING.to_string()
+    };
+    LauncherError::new(Problem::GameRunning, message)
 }
 
 // 남의 .minecraft 를 그대로 게임 루트로 쓰면 manifest 에 없는 모드를 지우는 정리가 그 사람의 모드를 지운다.

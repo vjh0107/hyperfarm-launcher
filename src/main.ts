@@ -128,6 +128,8 @@ function errorContent(error: LauncherError): ErrorContent {
       return { title: "게임 파일을 받지 못했어요", body: error.message, secondary: close, primary: retry };
     case "UNSUPPORTED_PLATFORM":
       return { title: "이 PC에서는 실행할 수 없어요", body: error.message, primary: close };
+    case "GAME_RUNNING":
+      return { title: "게임이 아직 켜져 있어요", body: error.message, secondary: close, primary: retry };
     case "GAME_EXITED":
       return {
         title: "게임이 바로 꺼졌어요",
