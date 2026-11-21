@@ -251,8 +251,18 @@ impl GameInstaller {
                 "게임용 Java 를 설치하지 못했어요.",
             ));
         }
+        // Dock 의 이름만 바꾸는 단계라 못 해도 게임은 그대로 켠다
         #[cfg(target_os = "macos")]
-        let java = game_app::wrap(&self.layout.runtimes(), &java).await?;
+        let java = match game_app::wrap(&self.layout.runtimes(), &java).await {
+            Ok(wrapped) => wrapped,
+            Err(error) => {
+                log::warn!(
+                    "Could not wrap the game in an app bundle: {}",
+                    error.message
+                );
+                java
+            }
+        };
         let natives = self.layout.version(&version.id).join("natives");
         for sub in ["java", "jna", "lwjgl", "netty"] {
             let directory = natives.join(sub);
