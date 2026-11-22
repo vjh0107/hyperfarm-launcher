@@ -26,10 +26,10 @@
     },
     {
       "id": "lithium",
-      "fileName": "lithium-fabric-0.26.3+mc26.3.jar",
-      "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/fWv5bnZk/lithium-fabric-0.26.3%2Bmc26.3.jar",
-      "sha512": "2ca92fb530135d2baddf0ba4cc4f93976234876a38c4aa02b487b2552400f005afcfbeebf5373fb4396fe2020537a42d7597b8da5a52b904355ef51d5fef07ad",
-      "size": 919892
+      "fileName": "lithium-fabric-0.26.4+mc26.3.jar",
+      "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/Lal8mJGR/lithium-fabric-0.26.4%2Bmc26.3.jar",
+      "sha512": "033f85813b0bcafe848a55dd741b9b1a30685dcdf774a922507bf63716b16bfd0fc12856ffc4ca3c76a36f6dc73310a7dfdc4b6dc9e35c21a4482627b1d30b85",
+      "size": 921530
     },
     {
       "id": "ferrite-core",
@@ -47,10 +47,10 @@
     },
     {
       "id": "entityculling",
-      "fileName": "entityculling-fabric-1.12.1-mc26.3.jar",
-      "url": "https://cdn.modrinth.com/data/NNAgCjsB/versions/UWpkLRV5/entityculling-fabric-1.12.1-mc26.3.jar",
-      "sha512": "c56e2a19fa98b8ee85d7f46b74966a272f03ec9a8edacd4a6eb629970f19fd4d2a9bddeacb8405f9abdb790a40895244927a28cf5dbbe4dcb65a0b307f493fcb",
-      "size": 1522184
+      "fileName": "entityculling-fabric-1.12.2-mc26.3.jar",
+      "url": "https://cdn.modrinth.com/data/NNAgCjsB/versions/42iHT1ru/entityculling-fabric-1.12.2-mc26.3.jar",
+      "sha512": "501bd756285ebbd887a63d57c4680da5d7b21877b07928ed6cbd33c354ecb7a288f1d62d60d83e6b7ffb22406ee3b1b53ec874a05f0daba790392fbf0a5c7d0c",
+      "size": 1522839
     },
     {
       "id": "hyperfarm",
