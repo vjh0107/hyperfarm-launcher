@@ -1,5 +1,7 @@
 mod auth;
 mod crash;
+#[cfg(target_os = "macos")]
+mod dock;
 mod error;
 mod flow;
 mod http;
@@ -186,8 +188,12 @@ fn show_crash(app: &AppHandle, crash: Crash) {
     flow.report_crash(&crash);
     flow.record_crash(crash);
     #[cfg(target_os = "macos")]
-    if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
-        log::warn!("Could not bring the launcher back to the Dock: {error}");
+    {
+        if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+            log::warn!("Could not bring the launcher back to the Dock: {error}");
+        }
+        // Dock 에서 빠졌다 돌아오면 타일이 새로 생긴다. 앞서 넘긴 그림이 이어진다고 기대지 않는다
+        dock::show_barn(app);
     }
     let config = app
         .config()
@@ -485,6 +491,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // macOS 26 은 둥근 사각형을 가장자리까지 채우지 않은 icns 를 회색 판에 넣어 Dock 에 띄운다. 실행 중에
+            // 넘긴 그림에는 판을 씌우지 않으므로, 이것을 지우면 런처만 다시 회색 판에 든 헛간으로 뜬다
+            #[cfg(target_os = "macos")]
+            dock::show_barn(app.handle());
             let handle = app.handle().clone();
             let opener = handle.clone();
             let browser = Arc::new(move |url: &str| {
