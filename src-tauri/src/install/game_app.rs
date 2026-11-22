@@ -6,6 +6,7 @@ use crate::install::download::io_error;
 const BUNDLE: &str = "HyperFarm.app";
 const EXECUTABLE: &str = "java";
 const ICON: &[u8] = include_bytes!("../../icons/icon.icns");
+const KOREAN_NAMES: &[u8] = include_bytes!("../../ko.lproj/InfoPlist.strings");
 
 fn info_plist() -> String {
     format!(
@@ -14,9 +15,16 @@ fn info_plist() -> String {
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>하이퍼팜</string>
+  <string>HyperFarm</string>
   <key>CFBundleDisplayName</key>
-  <string>하이퍼팜</string>
+  <string>HyperFarm</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>ko</string>
+  </array>
   <key>CFBundleIdentifier</key>
   <string>kr.junhyung.hyperfarm.game</string>
   <key>CFBundleExecutable</key>
@@ -33,14 +41,16 @@ fn info_plist() -> String {
     )
 }
 
-// Dock 과 앱 전환기는 실행 파일이 든 번들의 CFBundleName 을 이름으로 쓰고, 번들 밖의 java 는 실행 파일 이름 "java" 로 뜬다.
-// -Xdock:name 은 AWT 만 읽어 SDL 로 창을 띄우는 게임에는 먹지 않는다. java 는 libjli 를 링크를 따라간 실제 경로에서 찾으므로
-// 번들 안에 링크로 두어도 그대로 뜬다. 런타임 판이 바뀌면 경로도 바뀌므로 실행할 때마다 다시 건다
+// Dock 과 앱 전환기는 실행 파일이 든 번들의 CFBundleName(시스템 언어가 한국어면 ko.lproj 의 것)을 이름으로 쓰고, 번들 밖의
+// java 는 실행 파일 이름 "java" 로 뜬다. -Xdock:name 은 AWT 만 읽어 SDL 로 창을 띄우는 게임에는 먹지 않는다. java 는
+// libjli 를 링크를 따라간 실제 경로에서 찾으므로 번들 안에 링크로 두어도 그대로 뜬다. 런타임 판이 바뀌면 경로도 바뀌므로
+// 실행할 때마다 다시 건다
 pub async fn wrap(runtime_root: &Path, java: &Path) -> Result<PathBuf, LauncherError> {
     let contents = runtime_root.join(BUNDLE).join("Contents");
     let executables = contents.join("MacOS");
     let resources = contents.join("Resources");
-    for directory in [&executables, &resources] {
+    let korean = resources.join("ko.lproj");
+    for directory in [&executables, &korean] {
         tokio::fs::create_dir_all(directory)
             .await
             .map_err(io_error(directory))?;
@@ -53,6 +63,10 @@ pub async fn wrap(runtime_root: &Path, java: &Path) -> Result<PathBuf, LauncherE
     tokio::fs::write(&icon, ICON)
         .await
         .map_err(io_error(&icon))?;
+    let names = korean.join("InfoPlist.strings");
+    tokio::fs::write(&names, KOREAN_NAMES)
+        .await
+        .map_err(io_error(&names))?;
 
     let executable = executables.join(EXECUTABLE);
     match tokio::fs::remove_file(&executable).await {

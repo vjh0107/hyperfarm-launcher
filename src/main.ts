@@ -271,6 +271,13 @@ function onUpdate(event: UpdateEvent): void {
   progress.progress(total === 0 ? 0 : event.doneBytes / total, "", total === 0 ? bytes(event.doneBytes) : `${bytes(event.doneBytes)} / ${bytes(total)}`);
 }
 
+// 창은 숨긴 채 뜨고(tauri.conf.json 의 visible) 첫 화면을 DOM 에 둔 뒤에 보인다. 숨긴 창에서는 requestAnimationFrame 이
+// 돌지 않으므로 그려지기를 기다리면 창이 영영 뜨지 않는다
+async function reveal(): Promise<void> {
+  await appWindow.show();
+  await appWindow.setFocus();
+}
+
 async function start(): Promise<void> {
   info = await invoke<AppInfo>("app_info");
   progress = new ProgressScreen(
@@ -287,6 +294,7 @@ async function start(): Promise<void> {
     progress.checking("");
     show(progress.root);
   }
+  await reveal();
   await listen<LaunchEvent>("launch", ({ payload }) => onLaunch(payload));
   await listen<UpdateEvent>("update", ({ payload }) => onUpdate(payload));
   if (!crash) await invoke("begin");

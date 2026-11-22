@@ -23,7 +23,8 @@
         "decorations": false,
         "transparent": true,
         "shadow": false,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ],
     "security": {
@@ -42,6 +43,9 @@
     "macOS": {
       "minimumSystemVersion": "11.0",
       "entitlements": "./Entitlements.plist",
+      "files": {
+        "Resources/ko.lproj/InfoPlist.strings": "./ko.lproj/InfoPlist.strings"
+      },
       "dmg": {
         "background": "../packaging/dmg-background.png",
         "windowSize": { "width": 660, "height": 400 },
