@@ -54,10 +54,10 @@
     },
     {
       "id": "hyperfarm",
-      "fileName": "hyperfarm-0.1.16.jar",
-      "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.16.jar",
-      "sha512": "171b032c88654e9b6b457f7e16b77e6b4a4de76d853ce6a45c278dd9598a78d9700081904865718de6cff11376270e9125ba83cb7ae182e60d2b9cd754401280",
-      "size": 40229208
+      "fileName": "hyperfarm-0.1.17.jar",
+      "url": "https://pack.hyperf.kr/mods/hyperfarm-0.1.17.jar",
+      "sha512": "66ffcf3036560a985ccda0b89fa039e270a370561ab01ee3a3f4699f6b456454fe7ca200687522d49598720ee7379558800c7cebd86d291fab7002c5e2480552",
+      "size": 40229265
     }
   ],
   "shaderpacks": [
