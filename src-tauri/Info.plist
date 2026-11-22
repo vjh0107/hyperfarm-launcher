@@ -8,6 +8,6 @@
     <string>ko</string>
   </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>게임 안에서 가까운 플레이어와 음성으로 대화하려면 마이크가 필요해요.</string>
+  <string>A microphone is needed to voice chat with nearby players in the game.</string>
 </dict>
 </plist>
