@@ -197,12 +197,7 @@ fn show_crash(app: &AppHandle, crash: Crash) {
         .find(|window| window.label == "main")
         .expect("tauri.conf.json declares the main window");
     match WebviewWindowBuilder::from_config(app, config).and_then(|builder| builder.build()) {
-        Ok(window) => {
-            app.state::<Game>().forget_crash();
-            if let Err(error) = window.set_focus() {
-                log::warn!("Could not focus the crash window: {error}");
-            }
-        }
+        Ok(_) => app.state::<Game>().forget_crash(),
         Err(error) => {
             log::warn!("Could not reopen the launcher window after the crash: {error}");
             exit_after_crash_reports(app);
