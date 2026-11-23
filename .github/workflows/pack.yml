@@ -25,7 +25,7 @@ jobs:
       R2: s3://${{ secrets.R2_BUCKET }}/launcher
       ENDPOINT: ${{ secrets.R2_ENDPOINT }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 pack/check.py
       - name: Download every file in the pack
         run: python3 pack/verify.py
