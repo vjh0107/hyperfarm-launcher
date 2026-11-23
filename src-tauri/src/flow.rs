@@ -21,6 +21,7 @@ use crate::install::{
     DownloadPlan, GameInstaller, GameLayout, InstallListener, Installation, pack,
 };
 use crate::launch::{self, GameProcess, LaunchOptions};
+use crate::presence;
 use crate::settings::{CLIENT_ID, LauncherConfig, LauncherSettings, SettingsStore};
 use crate::ticket::{self, LaunchTicket};
 
@@ -515,6 +516,7 @@ impl LaunchFlow {
             launcher_version: env!("CARGO_PKG_VERSION"),
         };
         let command = launch::command(&installation, &session, &options, &self.platform);
+        presence::forget(&installation.game_directory).await;
         Ok(launch::start(
             &command,
             &installation.game_directory,
