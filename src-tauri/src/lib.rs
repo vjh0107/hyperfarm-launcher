@@ -158,6 +158,8 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
     let Some(game) = game else {
         return;
     };
+    let game_directory = game.directory.clone();
+    let launched = game.started;
     app.state::<Game>().start(game);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -168,7 +170,8 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
         let homepage = app.state::<Flow>().web_base().to_string();
-        let presence = tauri::async_runtime::spawn(presence::show(homepage));
+        let presence =
+            tauri::async_runtime::spawn(presence::show(homepage, game_directory, launched));
         let mut check = tokio::time::interval(GAME_CHECK_INTERVAL);
         while app.state::<Game>().is_running() {
             check.tick().await;
