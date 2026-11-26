@@ -23,7 +23,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
-use crash::Crash;
+use crash::{Crash, Filed, ReportError};
 use flow::{LaunchEvent, LaunchFlow, Step};
 use install::options::WorkArea;
 use launch::GameProcess;
@@ -223,6 +223,11 @@ fn crash(flow: State<'_, Flow>) -> Option<Crash> {
 fn crash_details(flow: State<'_, Flow>) -> Option<String> {
     flow.crash()
         .map(|crash| crash.details(env!("CARGO_PKG_VERSION")))
+}
+
+#[tauri::command]
+async fn report_crash(note: Option<String>, flow: State<'_, Flow>) -> Result<Filed, ReportError> {
+    flow.file_crash_report(note.as_deref()).await
 }
 
 #[tauri::command]
@@ -571,6 +576,7 @@ pub fn run() {
             quit,
             crash,
             crash_details,
+            report_crash,
             open_crash_report,
             open_log_folder,
         ])

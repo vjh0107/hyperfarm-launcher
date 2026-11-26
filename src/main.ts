@@ -3,7 +3,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import type { AppInfo, Crash, LaunchEvent, LauncherError, LauncherSettings, Step, UpdateEvent } from "./events";
+import type { AppInfo, Crash, CrashReportFiled, LaunchEvent, LauncherError, LauncherSettings, Step, UpdateEvent } from "./events";
 import { bytes, remaining, summary, type PackSummary } from "./format";
 import { accountRows, crashScreen, errorScreen, loginScreen, ProgressScreen, settingsScreen, type Chrome, type ErrorContent } from "./screens";
 
@@ -35,6 +35,10 @@ function show(screen: HTMLElement): void {
   screen.classList.remove("leaving");
   container.append(screen);
   current = screen;
+  fit(screen);
+}
+
+function fit(screen: HTMLElement): void {
   void appWindow.setSize(new LogicalSize(WIDTH, Number(screen.dataset.height ?? HEIGHT)));
 }
 
@@ -143,15 +147,16 @@ function errorContent(error: LauncherError): ErrorContent {
 // 복사는 클릭 안에서 곧바로 해야 WebKit 이 받아 주므로, 붙여 넣을 글은 화면을 그리기 전에 받아 둔다
 async function showCrash(crash: Crash): Promise<void> {
   const details = await invoke<string | null>("crash_details");
-  show(
-    crashScreen(chrome, crash, {
-      openLogs: () => void invoke("open_log_folder"),
-      openReport: () => void invoke("open_crash_report"),
-      copy: () => (details === null ? Promise.reject(new Error("no crash to copy")) : navigator.clipboard.writeText(details)),
-      close: chrome.close,
-      restart: () => run("play"),
-    }),
-  );
+  const screen = crashScreen(chrome, crash, {
+    openLogs: () => void invoke("open_log_folder"),
+    openReport: () => void invoke("open_crash_report"),
+    copy: () => (details === null ? Promise.reject(new Error("no crash to copy")) : navigator.clipboard.writeText(details)),
+    report: (note) => invoke<CrashReportFiled>("report_crash", { note }),
+    resize: () => fit(screen),
+    close: chrome.close,
+    restart: () => run("play"),
+  });
+  show(screen);
 }
 
 async function changeFolder(): Promise<void> {

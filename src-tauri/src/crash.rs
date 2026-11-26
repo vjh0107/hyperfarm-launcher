@@ -1,5 +1,6 @@
 mod fabric;
 mod reporting;
+mod support;
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -9,6 +10,9 @@ use serde::{Serialize, Serializer};
 use sysinfo::System;
 
 pub use reporting::{CrashReporter, LaunchContext};
+pub use support::{
+    CrashReport, Filed, ReportError, ReportProblem, SupportEndpoints, crashed_player_session, file,
+};
 
 const CRASH_REPORTS: &str = "crash-reports";
 const JVM_REPORT_PREFIX: &str = "hs_err_pid";

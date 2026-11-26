@@ -19,6 +19,16 @@ export interface Crash {
   report: string | null;
 }
 
+export interface CrashReportFiled {
+  outcome: "OPENED" | "APPENDED" | "REPLAYED";
+  ticketId: number;
+}
+
+export interface CrashReportError {
+  problem: "NO_CRASH" | "LOGIN_REQUIRED" | "ACCOUNT_CHANGED" | "RATE_LIMITED" | "EVENT_TAKEN" | "UNAVAILABLE" | "NETWORK" | "REJECTED";
+  message: string;
+}
+
 export interface LauncherError {
   problem: Problem;
   message: string;
