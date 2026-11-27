@@ -45,9 +45,16 @@ pub struct LauncherSettings {
     // 0.1.13 까지의 launcher.json 에는 이 키가 없다. 기본값이 없으면 그 파일을 읽지 못해 메모리와 폴더 설정이 통째로 초기화된다
     #[serde(default = "sends_crash_reports_by_default")]
     pub send_crash_reports: bool,
+    // 0.1.17 까지의 launcher.json 에는 이 키가 없다. 기본값이 없으면 위와 같이 설정이 통째로 초기화된다
+    #[serde(default = "shows_discord_activity_by_default")]
+    pub show_discord_activity: bool,
 }
 
 fn sends_crash_reports_by_default() -> bool {
+    true
+}
+
+fn shows_discord_activity_by_default() -> bool {
     true
 }
 
@@ -61,6 +68,7 @@ impl LauncherSettings {
             },
             game_directory: None,
             send_crash_reports: sends_crash_reports_by_default(),
+            show_discord_activity: shows_discord_activity_by_default(),
         }
     }
 }
@@ -124,6 +132,7 @@ mod tests {
                 memory_megabytes: 6144,
                 game_directory: None,
                 send_crash_reports: true,
+                show_discord_activity: true,
             }
         );
     }
@@ -144,8 +153,42 @@ mod tests {
                 memory_megabytes: 8192,
                 game_directory: Some(PathBuf::from("/games/HyperFarm")),
                 send_crash_reports: true,
+                show_discord_activity: true,
             }
         );
+    }
+
+    #[test]
+    fn keeps_showing_discord_activity_for_a_file_written_before_the_switch_existed() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("launcher.json");
+        std::fs::write(
+            &file,
+            r#"{"memoryMegabytes": 8192, "gameDirectory": null, "sendCrashReports": false}"#,
+        )
+        .unwrap();
+        let store = SettingsStore::new(file, LARGER_HEAP_FROM);
+        assert_eq!(
+            store.load(),
+            LauncherSettings {
+                memory_megabytes: 8192,
+                game_directory: None,
+                send_crash_reports: false,
+                show_discord_activity: true,
+            }
+        );
+    }
+
+    #[test]
+    fn remembers_that_discord_activity_is_turned_off() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(directory.path().join("launcher.json"), LARGER_HEAP_FROM);
+        let settings = LauncherSettings {
+            show_discord_activity: false,
+            ..LauncherSettings::defaults(LARGER_HEAP_FROM)
+        };
+        store.save(&settings).unwrap();
+        assert_eq!(store.load(), settings);
     }
 
     #[test]

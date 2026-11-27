@@ -4,7 +4,7 @@ import { h, icon, Icons } from "./dom";
 import type { Crash, CrashReportFiled } from "./events";
 import { gigabytes } from "./format";
 
-const SETTINGS_HEIGHT = 440;
+const SETTINGS_HEIGHT = 496;
 const CRASH_REPORT_HEIGHT = 344;
 const CRASH_NOTE_HEIGHT = 344;
 const COPY_FEEDBACK_MS = 2000;
@@ -337,6 +337,7 @@ export function accountRows(webBase: string, rows: { label: string; playerId: st
 export interface SettingsModel {
   memoryMegabytes: number;
   sendCrashReports: boolean;
+  showDiscordActivity: boolean;
   totalMemoryBytes: number;
   gameDirectory: string;
   session: { playerId: string; name: string } | null;
@@ -344,11 +345,22 @@ export interface SettingsModel {
   footer: string;
   onMemory(megabytes: number): void;
   onCrashReports(send: boolean): void;
+  onDiscordActivity(show: boolean): void;
   onOpenFolder(): void;
   onSignOut(): void;
 }
 
 const MEMORY_GIGABYTES = [4, 6, 8, 12];
+
+function toggle(label: string, on: boolean, change: (on: boolean) => void): HTMLButtonElement {
+  const button = h("button", { class: "switch", role: "switch", "aria-checked": String(on), "aria-label": label });
+  button.addEventListener("click", () => {
+    const next = button.getAttribute("aria-checked") !== "true";
+    button.setAttribute("aria-checked", String(next));
+    change(next);
+  });
+  return button;
+}
 
 export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () => void): HTMLElement {
   const header = h(
@@ -382,12 +394,6 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
     signOut.disabled = true;
   });
   signOut.disabled = model.session === null;
-  const crashReports = h("button", { class: "switch", role: "switch", "aria-checked": String(model.sendCrashReports), "aria-label": "크래시 보고" });
-  crashReports.addEventListener("click", () => {
-    const send = crashReports.getAttribute("aria-checked") !== "true";
-    crashReports.setAttribute("aria-checked", String(send));
-    model.onCrashReports(send);
-  });
   const places = h(
     "div",
     { class: "card places" },
@@ -408,7 +414,13 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
       "div",
       { class: "item" },
       h("div", { class: "item-text" }, h("span", { class: "item-title" }, "크래시 보고"), h("span", { class: "caption" }, "꺼진 원인과 PC·런처 정보만 보내고, 계정은 보내지 않아요")),
-      crashReports,
+      toggle("크래시 보고", model.sendCrashReports, (send) => model.onCrashReports(send)),
+    ),
+    h(
+      "div",
+      { class: "item" },
+      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "디스코드 활동 표시"), h("span", { class: "caption" }, "Discord 프로필에 플레이 중과 있는 곳, 내 섬과 레벨을 보여 줘요")),
+      toggle("디스코드 활동 표시", model.showDiscordActivity, (show) => model.onDiscordActivity(show)),
     ),
   );
 

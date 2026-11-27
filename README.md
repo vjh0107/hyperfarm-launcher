@@ -169,7 +169,8 @@ player chooses to send:
 - **Discord**, if it is running on the player's computer, is told over its local connection that the player is playing,
   with the start time, and, as the HyperFarm server tells the HyperFarm mod, where the player is in the game (a town
   channel or an island) and the name and level of the player's own island, so that it can show this on the player's
-  profile. Nothing is sent when Discord is not running.
+  profile. Nothing is sent when Discord is not running. Players turn this off with the 디스코드 활동 표시 switch in the
+  launcher's settings; it takes effect the next time the game starts.
 - **HyperFarm's crash server**, named by `crashReportDsn` in the pack manifest, receives a summary when the game exits
   with an error: the exit code; the description, exception and first stack frame from the game's crash report, the
   error and problematic frame from the JVM's fatal error log, or, when a mod stops the game during start-up, the first

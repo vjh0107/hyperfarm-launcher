@@ -181,6 +181,7 @@ async function openSettings(): Promise<void> {
       {
         memoryMegabytes: settings.memoryMegabytes,
         sendCrashReports: settings.sendCrashReports,
+        showDiscordActivity: settings.showDiscordActivity,
         totalMemoryBytes: info.totalMemoryBytes,
         gameDirectory: info.gameDirectory,
         session,
@@ -188,6 +189,7 @@ async function openSettings(): Promise<void> {
         footer,
         onMemory: (memoryMegabytes) => save({ memoryMegabytes }),
         onCrashReports: (sendCrashReports) => save({ sendCrashReports }),
+        onDiscordActivity: (showDiscordActivity) => save({ showDiscordActivity }),
         onOpenFolder: () => void invoke("open_game_directory"),
         onSignOut: () => {
           session = null;
