@@ -419,7 +419,7 @@ export function settingsScreen(chrome: Chrome, model: SettingsModel, back: () =>
     h(
       "div",
       { class: "item" },
-      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "디스코드 활동 표시"), h("span", { class: "caption" }, "Discord 프로필에 플레이 중과 있는 곳을 보여 줘요")),
+      h("div", { class: "item-text" }, h("span", { class: "item-title" }, "디스코드 활동 표시"), h("span", { class: "caption" }, "Discord 프로필에 플레이 중과 있는 곳, 내 섬과 레벨을 보여 줘요")),
       toggle("디스코드 활동 표시", model.showDiscordActivity, (show) => model.onDiscordActivity(show)),
     ),
   );
