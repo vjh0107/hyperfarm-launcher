@@ -152,8 +152,8 @@ async fn run_step(app: AppHandle, step: Step, flow: State<'_, Flow>) -> Result<(
     Ok(())
 }
 
-// 창은 닫고 게임이 도는 동안 남아 Discord 에 플레이 중을 띄운다. 게임이 제대로 꺼지면 함께 꺼지고, 크래시면 창을 다시
-// 띄워 알린다
+// 창은 닫고 게임이 도는 동안 남아, 설정에서 끄지 않았으면 Discord 에 플레이 중을 띄운다. 게임이 제대로 꺼지면 함께
+// 꺼지고, 크래시면 창을 다시 띄워 알린다
 fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
     let Some(game) = game else {
         return;
@@ -169,14 +169,24 @@ fn stay_while_playing(app: &AppHandle, game: Option<GameProcess>) {
         }
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-        let homepage = app.state::<Flow>().web_base().to_string();
-        let presence =
-            tauri::async_runtime::spawn(presence::show(homepage, game_directory, launched));
+        let presence = {
+            let flow = app.state::<Flow>();
+            if flow.settings().show_discord_activity {
+                let homepage = flow.web_base().to_string();
+                let showing = presence::show(homepage, game_directory, launched);
+                Some(tauri::async_runtime::spawn(showing))
+            } else {
+                log::info!("Discord activity is turned off in the launcher settings");
+                None
+            }
+        };
         let mut check = tokio::time::interval(GAME_CHECK_INTERVAL);
         while app.state::<Game>().is_running() {
             check.tick().await;
         }
-        presence.abort();
+        if let Some(presence) = presence {
+            presence.abort();
+        }
         match app.state::<Game>().crash() {
             Some(crash) => show_crash(&app, crash),
             None => exit_after_crash_reports(&app),

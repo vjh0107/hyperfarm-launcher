@@ -64,6 +64,7 @@ export interface LauncherSettings {
   memoryMegabytes: number;
   gameDirectory: string | null;
   sendCrashReports: boolean;
+  showDiscordActivity: boolean;
 }
 
 export type Step = "retry" | "switchAccount" | "continueAnyway" | "play";
